@@ -4,9 +4,9 @@
 
 # PACT
 
-### Programmable Agent Contract Toolkit
+### Stop writing agent spaghetti.
 
-A typed, permission-enforced language for orchestrating AI agents.
+PACT is a typed language for AI agent orchestration. Permissions, contracts, and guardrails — built into the syntax, enforced by the compiler.
 
 [![CI](https://github.com/Pact-Lang/pact/actions/workflows/ci.yml/badge.svg)](https://github.com/Pact-Lang/pact/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/pact-lang.svg)](https://crates.io/crates/pact-lang)
