@@ -1,0 +1,17 @@
+flowchart LR
+    tool_web_search(Web Search)
+    tool_summarize(Summarize)
+    tool_draft_report(Draft Report)
+    schema_report((Report))
+    agent_researcher{Researcher}
+    agent_writer{Writer}
+    agent_researcher --> tool_web_search
+    agent_researcher --> tool_summarize
+    agent_writer --> tool_draft_report
+    agent_researcher -->|dispatch| tool_web_search
+    agent_researcher -->|dispatch| tool_summarize
+    agent_writer -->|dispatch| tool_draft_report
+    subgraph Research Team
+        agent_researcher
+        agent_writer
+    end

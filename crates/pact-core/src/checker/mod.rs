@@ -1,0 +1,988 @@
+// Copyright (c) 2025-2026 Gabriel Lars Sabadin
+// Licensed under the MIT License. See LICENSE file in the project root.
+// Created: 2025-06-10
+
+//! Semantic analysis for the PACT language.
+//!
+//! The checker performs two passes over the AST:
+//!
+//! 1. **Name collection** — registers all top-level declarations into a
+//!    [`SymbolTable`](scope::SymbolTable), detecting duplicates.
+//! 2. **Validation** — verifies type references, agent-tool-permission
+//!    consistency, and other semantic rules.
+//!
+//! # Tool Permission Resolution
+//!
+//! The checker uses a two-tier approach for tool permissions:
+//! - **Declarative** — if `tool #name { ... }` declarations exist, their
+//!   `requires` lists are used.
+//! - **Fallback** — if a tool is referenced but not declared, the hardcoded
+//!   [`tool_permission_registry`](permissions::tool_permission_registry) is consulted.
+//!
+//! # Usage
+//!
+//! ```
+//! use pact_core::checker::Checker;
+//! use pact_core::ast::stmt::Program;
+//! # use pact_core::lexer::Lexer;
+//! # use pact_core::parser::Parser;
+//! # use pact_core::span::SourceMap;
+//! # let mut sm = SourceMap::new();
+//! # let id = sm.add("test.pact", "agent @g { permits: [^llm.query] tools: [#greet] }");
+//! # let tokens = Lexer::new(sm.text(id), id).lex().unwrap();
+//! # let program = Parser::new(&tokens).parse().unwrap();
+//! let errors = Checker::new().check(&program);
+//! if errors.is_empty() {
+//!     println!("OK");
+//! }
+//! ```
+
+pub mod permissions;
+pub mod scope;
+pub mod types;
+
+use crate::ast::expr::ExprKind;
+use crate::ast::stmt::{DeclKind, Program};
+use crate::ast::types::TypeExprKind;
+use permissions::{permission_satisfies, tool_permission_registry};
+use scope::{SymbolKind, SymbolTable};
+use types::is_builtin_type;
+
+use miette::Diagnostic;
+use thiserror::Error;
+
+/// A diagnostic error produced during semantic analysis.
+#[derive(Debug, Error, Diagnostic, Clone)]
+pub enum CheckError {
+    #[error("duplicate definition of '{name}'")]
+    DuplicateDefinition {
+        name: String,
+        #[label("redefined here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("unknown type '{name}'")]
+    UnknownType {
+        name: String,
+        #[label("used here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("agent '@{agent}' uses tool '#{tool}' which requires permission '{permission}', but the agent does not have it")]
+    #[diagnostic(help("add '^{permission}' to the agent's permits list"))]
+    MissingPermission {
+        agent: String,
+        tool: String,
+        permission: String,
+        #[label("tool used here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("unknown agent '@{name}'")]
+    UnknownAgent {
+        name: String,
+        #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("unknown flow '{name}'")]
+    UnknownFlow {
+        name: String,
+        #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("type inference warning: variable '{variable}' was inferred as {expected} but is being assigned {found}")]
+    TypeInferenceWarning {
+        variable: String,
+        expected: String,
+        found: String,
+    },
+
+    #[error("tool '#{tool}' source arg '{arg}' does not match any declared parameter")]
+    #[diagnostic(help("source args should reference parameters declared in the tool's params block"))]
+    SourceArgNotAParam {
+        tool: String,
+        arg: String,
+        #[label("tool declared here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("unknown template '%{name}'")]
+    #[diagnostic(help("define a template with `template %{name} {{ ... }}`"))]
+    UnknownTemplate {
+        name: String,
+        #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+
+    #[error("unknown directive '%{name}'")]
+    #[diagnostic(help("define a directive with `directive %{name} {{ ... }}`"))]
+    UnknownDirective {
+        name: String,
+        #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+}
+
+/// The semantic checker for PACT programs.
+pub struct Checker {
+    symbols: SymbolTable,
+    errors: Vec<CheckError>,
+    /// Whether the program contains any `tool` declarations.
+    /// When true, we use declarative tool info; when false, we fall back
+    /// to the hardcoded registry for backward compatibility.
+    has_tool_decls: bool,
+}
+
+impl Checker {
+    /// Create a new checker.
+    pub fn new() -> Self {
+        Self {
+            symbols: SymbolTable::new(),
+            errors: Vec::new(),
+            has_tool_decls: false,
+        }
+    }
+
+    /// Run all semantic checks on a program. Returns the list of errors found.
+    pub fn check(mut self, program: &Program) -> Vec<CheckError> {
+        self.collect_names(program);
+        self.validate(program);
+        self.run_type_inference(program);
+        self.errors
+    }
+
+    /// Pass 1: Collect all top-level names into the symbol table.
+    fn collect_names(&mut self, program: &Program) {
+        for decl in &program.decls {
+            match &decl.kind {
+                DeclKind::Agent(a) => {
+                    let permits: Vec<Vec<String>> = a
+                        .permits
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            ExprKind::PermissionRef(segs) => Some(segs.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    let tools: Vec<String> = a
+                        .tools
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            ExprKind::ToolRef(name) => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !self
+                        .symbols
+                        .define(a.name.clone(), SymbolKind::Agent { permits, tools })
+                    {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: a.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::AgentBundle(ab) => {
+                    let agents: Vec<String> = ab
+                        .agents
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            ExprKind::AgentRef(name) => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    if !self
+                        .symbols
+                        .define(ab.name.clone(), SymbolKind::AgentBundle { agents })
+                    {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: ab.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::Tool(t) => {
+                    self.has_tool_decls = true;
+                    let requires: Vec<Vec<String>> = t
+                        .requires
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            ExprKind::PermissionRef(segs) => Some(segs.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    let params: Vec<(String, String, bool)> = t
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let type_name =
+                                p.ty.as_ref()
+                                    .map(Self::type_expr_to_string)
+                                    .unwrap_or_else(|| "Any".to_string());
+                            // All params are required for now (Optional<T> support later)
+                            (p.name.clone(), type_name, true)
+                        })
+                        .collect();
+                    let return_type = t.return_type.as_ref().map(Self::type_expr_to_string);
+                    if !self.symbols.define(
+                        t.name.clone(),
+                        SymbolKind::Tool {
+                            requires,
+                            params,
+                            return_type,
+                        },
+                    ) {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: t.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::Flow(f) => {
+                    if !self.symbols.define(
+                        f.name.clone(),
+                        SymbolKind::Flow {
+                            param_count: f.params.len(),
+                        },
+                    ) {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: f.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::Schema(s) => {
+                    let fields: Vec<(String, String)> = s
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            let type_name = Self::type_expr_to_string(&f.ty);
+                            (f.name.clone(), type_name)
+                        })
+                        .collect();
+                    if !self
+                        .symbols
+                        .define(s.name.clone(), SymbolKind::Schema { fields })
+                    {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: s.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::TypeAlias(t) => {
+                    if !self.symbols.define(
+                        t.name.clone(),
+                        SymbolKind::TypeAlias {
+                            variants: t.variants.clone(),
+                        },
+                    ) {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: t.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::PermitTree(pt) => {
+                    self.collect_permit_nodes(&pt.nodes);
+                }
+                DeclKind::Skill(s) => {
+                    let tools: Vec<String> = s
+                        .tools
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            ExprKind::ToolRef(name) => Some(name.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    let params: Vec<(String, String, bool)> = s
+                        .params
+                        .iter()
+                        .map(|p| {
+                            let type_name =
+                                p.ty.as_ref()
+                                    .map(Self::type_expr_to_string)
+                                    .unwrap_or_else(|| "Any".to_string());
+                            (p.name.clone(), type_name, true)
+                        })
+                        .collect();
+                    let return_type = s.return_type.as_ref().map(Self::type_expr_to_string);
+                    if !self.symbols.define(
+                        s.name.clone(),
+                        SymbolKind::Skill {
+                            tools,
+                            params,
+                            return_type,
+                        },
+                    ) {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: s.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::Template(t) => {
+                    let entries: Vec<String> = t
+                        .entries
+                        .iter()
+                        .map(|e| match e {
+                            crate::ast::stmt::TemplateEntry::Field { name, .. } => name.clone(),
+                            crate::ast::stmt::TemplateEntry::Repeat { name, .. } => name.clone(),
+                            crate::ast::stmt::TemplateEntry::Section { name, .. } => name.clone(),
+                        })
+                        .collect();
+                    if !self
+                        .symbols
+                        .define(t.name.clone(), SymbolKind::Template { entries })
+                    {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: t.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::Directive(d) => {
+                    let params: Vec<String> =
+                        d.params.iter().map(|p| p.name.clone()).collect();
+                    if !self
+                        .symbols
+                        .define(d.name.clone(), SymbolKind::Directive { params })
+                    {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: d.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
+                DeclKind::Test(_) => {
+                    // Tests don't define symbols
+                }
+                DeclKind::Import(_) => {
+                    // Imports are resolved by the loader before checking
+                }
+            }
+        }
+    }
+
+    /// Recursively collect permission paths from a permit tree.
+    fn collect_permit_nodes(&mut self, nodes: &[crate::ast::stmt::PermitNode]) {
+        for node in nodes {
+            let path = node.path.join(".");
+            self.symbols.define_permission(path);
+            self.collect_permit_nodes(&node.children);
+        }
+    }
+
+    /// Pass 2: Validate semantic rules.
+    fn validate(&mut self, program: &Program) {
+        // Build the fallback registry only if no tool declarations exist.
+        let fallback_registry = if self.has_tool_decls {
+            None
+        } else {
+            Some(tool_permission_registry())
+        };
+
+        for decl in &program.decls {
+            match &decl.kind {
+                DeclKind::Agent(a) => {
+                    let permits: Vec<Vec<String>> = a
+                        .permits
+                        .iter()
+                        .filter_map(|e| match &e.kind {
+                            ExprKind::PermissionRef(segs) => Some(segs.clone()),
+                            _ => None,
+                        })
+                        .collect();
+
+                    for tool_expr in &a.tools {
+                        if let ExprKind::ToolRef(tool_name) = &tool_expr.kind {
+                            self.check_tool_permissions(
+                                &a.name,
+                                tool_name,
+                                &permits,
+                                tool_expr.span.start,
+                                tool_expr.span.end,
+                                &fallback_registry,
+                            );
+                        }
+                    }
+                }
+                DeclKind::Tool(t) => {
+                    // Validate tool parameter types
+                    for param in &t.params {
+                        if let Some(ty) = &param.ty {
+                            self.check_type_exists(ty);
+                        }
+                    }
+                    if let Some(rt) = &t.return_type {
+                        self.check_type_exists(rt);
+                    }
+
+                    // Validate source capability reference
+                    if let Some(source) = &t.source {
+                        let param_names: Vec<&str> =
+                            t.params.iter().map(|p| p.name.as_str()).collect();
+                        for arg in &source.args {
+                            if !param_names.contains(&arg.as_str()) {
+                                self.errors.push(CheckError::SourceArgNotAParam {
+                                    tool: t.name.clone(),
+                                    arg: arg.clone(),
+                                    span: (decl.span.start..decl.span.end).into(),
+                                });
+                            }
+                        }
+                    }
+
+                    // Validate output template reference
+                    if let Some(output) = &t.output {
+                        match self.symbols.lookup(output) {
+                            Some(SymbolKind::Template { .. }) => {} // OK
+                            _ => {
+                                self.errors.push(CheckError::UnknownTemplate {
+                                    name: output.clone(),
+                                    span: (decl.span.start..decl.span.end).into(),
+                                });
+                            }
+                        }
+                    }
+
+                    // Validate directive references
+                    for dir_name in &t.directives {
+                        match self.symbols.lookup(dir_name) {
+                            Some(SymbolKind::Directive { .. }) => {} // OK
+                            _ => {
+                                self.errors.push(CheckError::UnknownDirective {
+                                    name: dir_name.clone(),
+                                    span: (decl.span.start..decl.span.end).into(),
+                                });
+                            }
+                        }
+                    }
+
+                    // Validate validate: field values
+                    if let Some(validate) = &t.validate {
+                        if validate != "strict" && validate != "lenient" {
+                            self.errors.push(CheckError::UnknownType {
+                                name: format!("invalid validation mode '{}' (expected 'strict' or 'lenient')", validate),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
+                        }
+                    }
+
+                    // Validate cache: duration format (number followed by s/m/h/d)
+                    if let Some(cache) = &t.cache {
+                        let valid = cache.len() >= 2
+                            && cache[..cache.len() - 1].parse::<u64>().is_ok()
+                            && matches!(cache.chars().last(), Some('s' | 'm' | 'h' | 'd'));
+                        if !valid {
+                            self.errors.push(CheckError::UnknownType {
+                                name: format!("invalid cache duration '{}' (expected format like '24h', '30m', '7d')", cache),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
+                        }
+                    }
+
+                    // Warn if retry count is unreasonably high
+                    if let Some(retry) = t.retry {
+                        if retry > 10 {
+                            self.errors.push(CheckError::TypeInferenceWarning {
+                                variable: format!("tool #{}", t.name),
+                                expected: "retry count <= 10".to_string(),
+                                found: format!("retry: {}", retry),
+                            });
+                        }
+                    }
+                }
+                DeclKind::Template(t) => {
+                    // Validate template entry types
+                    for entry in &t.entries {
+                        match entry {
+                            crate::ast::stmt::TemplateEntry::Field { ty, .. } => {
+                                self.check_type_exists(ty);
+                            }
+                            crate::ast::stmt::TemplateEntry::Repeat { ty, .. } => {
+                                self.check_type_exists(ty);
+                            }
+                            crate::ast::stmt::TemplateEntry::Section { .. } => {}
+                        }
+                    }
+                }
+                DeclKind::Flow(f) => {
+                    for param in &f.params {
+                        if let Some(ty) = &param.ty {
+                            self.check_type_exists(ty);
+                        }
+                    }
+                    if let Some(rt) = &f.return_type {
+                        self.check_type_exists(rt);
+                    }
+                    // Validate expressions in flow body
+                    for expr in &f.body {
+                        self.check_expr(expr);
+                    }
+                }
+                DeclKind::Schema(s) => {
+                    for field in &s.fields {
+                        self.check_type_exists(&field.ty);
+                    }
+                }
+                DeclKind::Directive(d) => {
+                    // Validate directive parameter types
+                    for param in &d.params {
+                        self.check_type_exists(&param.ty);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Recursively check expressions for semantic errors (e.g. RunFlow references).
+    fn check_expr(&mut self, expr: &crate::ast::expr::Expr) {
+        match &expr.kind {
+            ExprKind::RunFlow { flow_name, args } => {
+                // Verify the referenced flow exists
+                match self.symbols.lookup(flow_name) {
+                    Some(SymbolKind::Flow { .. }) => {} // OK
+                    _ => {
+                        self.errors.push(CheckError::UnknownFlow {
+                            name: flow_name.clone(),
+                            span: (expr.span.start..expr.span.end).into(),
+                        });
+                    }
+                }
+                for arg in args {
+                    self.check_expr(arg);
+                }
+            }
+            ExprKind::OnError { body, fallback } => {
+                self.check_expr(body);
+                self.check_expr(fallback);
+            }
+            ExprKind::Env(_) => {
+                // No static validation needed — runtime check
+            }
+            ExprKind::Assign { value, .. } => {
+                self.check_expr(value);
+            }
+            ExprKind::Pipeline { left, right } => {
+                self.check_expr(left);
+                self.check_expr(right);
+            }
+            ExprKind::FallbackChain { primary, fallback } => {
+                self.check_expr(primary);
+                self.check_expr(fallback);
+            }
+            ExprKind::AgentDispatch { agent, tool, args } => {
+                self.check_expr(agent);
+                self.check_expr(tool);
+                for arg in args {
+                    self.check_expr(arg);
+                }
+            }
+            ExprKind::FuncCall { callee, args } => {
+                self.check_expr(callee);
+                for arg in args {
+                    self.check_expr(arg);
+                }
+            }
+            ExprKind::BinOp { left, right, .. } => {
+                self.check_expr(left);
+                self.check_expr(right);
+            }
+            ExprKind::Return(inner) | ExprKind::Fail(inner) | ExprKind::Assert(inner) => {
+                self.check_expr(inner);
+            }
+            ExprKind::Parallel(exprs) | ExprKind::ListLit(exprs) | ExprKind::Record(exprs) => {
+                for e in exprs {
+                    self.check_expr(e);
+                }
+            }
+            ExprKind::Match { subject, arms } => {
+                self.check_expr(subject);
+                for arm in arms {
+                    self.check_expr(&arm.body);
+                }
+            }
+            ExprKind::FieldAccess { object, .. } => {
+                self.check_expr(object);
+            }
+            ExprKind::Typed { expr, .. } => {
+                self.check_expr(expr);
+            }
+            ExprKind::RecordFields(fields) => {
+                for (_, val) in fields {
+                    self.check_expr(val);
+                }
+            }
+            // Leaf nodes — no recursion needed
+            _ => {}
+        }
+    }
+
+    /// Check that an agent has the permissions required by a tool.
+    ///
+    /// First looks up the tool in the symbol table (declarative). If not found,
+    /// falls back to the hardcoded registry (if provided).
+    fn check_tool_permissions(
+        &mut self,
+        agent_name: &str,
+        tool_name: &str,
+        agent_permits: &[Vec<String>],
+        span_start: usize,
+        span_end: usize,
+        fallback: &Option<std::collections::HashMap<&str, Vec<&str>>>,
+    ) {
+        // Try declarative tool lookup first
+        if let Some(SymbolKind::Tool { requires, .. }) = self.symbols.lookup(tool_name) {
+            let requires = requires.clone();
+            for perm_path in &requires {
+                let perm_str = perm_path.join(".");
+                if !permission_satisfies(agent_permits, &perm_str) {
+                    self.errors.push(CheckError::MissingPermission {
+                        agent: agent_name.to_string(),
+                        tool: tool_name.to_string(),
+                        permission: perm_str,
+                        span: (span_start..span_end).into(),
+                    });
+                }
+            }
+            return;
+        }
+
+        // Fall back to hardcoded registry
+        if let Some(registry) = fallback {
+            if let Some(required) = registry.get(tool_name) {
+                for perm in required {
+                    if !permission_satisfies(agent_permits, perm) {
+                        self.errors.push(CheckError::MissingPermission {
+                            agent: agent_name.to_string(),
+                            tool: tool_name.to_string(),
+                            permission: perm.to_string(),
+                            span: (span_start..span_end).into(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check that a type reference refers to a known type.
+    fn check_type_exists(&mut self, ty: &crate::ast::types::TypeExpr) {
+        match &ty.kind {
+            TypeExprKind::Named(name) => {
+                if !is_builtin_type(name) && self.symbols.lookup(name).is_none() {
+                    self.errors.push(CheckError::UnknownType {
+                        name: name.clone(),
+                        span: (ty.span.start..ty.span.end).into(),
+                    });
+                }
+            }
+            TypeExprKind::Generic { name, args } => {
+                if !is_builtin_type(name) && self.symbols.lookup(name).is_none() {
+                    self.errors.push(CheckError::UnknownType {
+                        name: name.clone(),
+                        span: (ty.span.start..ty.span.end).into(),
+                    });
+                }
+                for arg in args {
+                    self.check_type_exists(arg);
+                }
+            }
+            TypeExprKind::Optional(inner) => {
+                self.check_type_exists(inner);
+            }
+        }
+    }
+
+    /// Run basic type inference over all flows in the program.
+    fn run_type_inference(&mut self, program: &Program) {
+        let mut inference = types::TypeInference::new();
+        inference.infer_program(program, &self.symbols);
+        for warning in &inference.warnings {
+            self.errors.push(CheckError::TypeInferenceWarning {
+                variable: warning.variable.clone(),
+                expected: warning.expected.clone(),
+                found: warning.found.clone(),
+            });
+        }
+    }
+
+    /// Convert a type expression to a string representation.
+    pub fn type_expr_to_string(ty: &crate::ast::types::TypeExpr) -> String {
+        match &ty.kind {
+            TypeExprKind::Named(n) => n.clone(),
+            TypeExprKind::Generic { name, args } => {
+                let arg_strs: Vec<String> = args.iter().map(Self::type_expr_to_string).collect();
+                format!("{}<{}>", name, arg_strs.join(", "))
+            }
+            TypeExprKind::Optional(inner) => {
+                format!("{}?", Self::type_expr_to_string(inner))
+            }
+        }
+    }
+}
+
+impl Default for Checker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+    use crate::span::SourceMap;
+
+    fn check_src(src: &str) -> Vec<CheckError> {
+        let mut sm = SourceMap::new();
+        let id = sm.add("test.pact", src);
+        let tokens = Lexer::new(src, id).lex().unwrap();
+        let program = Parser::new(&tokens).parse().unwrap();
+        Checker::new().check(&program)
+    }
+
+    // ── Backward-compatible tests (no tool decls → hardcoded fallback) ──
+
+    #[test]
+    fn valid_agent_passes() {
+        let errors = check_src("agent @greeter { permits: [^llm.query] tools: [#greet] }");
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn missing_permission_detected() {
+        let errors = check_src("agent @bad { permits: [] tools: [#web_search] }");
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::MissingPermission { .. }));
+    }
+
+    #[test]
+    fn parent_permission_satisfies() {
+        let errors = check_src("agent @ok { permits: [^net] tools: [#web_search] }");
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn unknown_type_detected() {
+        let errors = check_src("flow f(x :: UnknownType) { return x }");
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::UnknownType { .. }));
+    }
+
+    #[test]
+    fn builtin_type_passes() {
+        let errors = check_src("flow f(x :: String) -> String { return x }");
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn duplicate_definition_detected() {
+        let errors =
+            check_src("agent @a { permits: [] tools: [] } agent @a { permits: [] tools: [] }");
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::DuplicateDefinition { .. }));
+    }
+
+    #[test]
+    fn schema_field_types_checked() {
+        let errors = check_src("schema Report { title :: String, score :: Float }");
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn permit_tree_collects_permissions() {
+        let src = r#"
+            permit_tree {
+                ^net {
+                    ^net.read
+                    ^net.write
+                }
+            }
+            agent @fetcher { permits: [^net.read] tools: [#web_search] }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    // ── Declarative tool tests ─────────────────────────────────────
+
+    #[test]
+    fn declarative_tool_permissions() {
+        let src = r#"
+            tool #custom_search {
+                description: <<Search things>>
+                requires: [^net.read]
+                params {
+                    query :: String
+                }
+                returns :: String
+            }
+            agent @searcher { permits: [^net.read] tools: [#custom_search] }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn declarative_tool_missing_permission() {
+        let src = r#"
+            tool #custom_search {
+                description: <<Search things>>
+                requires: [^net.read]
+                params {
+                    query :: String
+                }
+            }
+            agent @bad { permits: [] tools: [#custom_search] }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::MissingPermission { .. }));
+    }
+
+    #[test]
+    fn declarative_tool_type_checking() {
+        let src = r#"
+            tool #analyze {
+                description: <<Analyze data>>
+                requires: [^llm.query]
+                params {
+                    data :: String
+                }
+                returns :: UnknownType
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::UnknownType { .. }));
+    }
+
+    #[test]
+    fn declarative_tool_duplicate() {
+        let src = r#"
+            tool #x {
+                description: <<First>>
+                requires: []
+                params {}
+            }
+            tool #x {
+                description: <<Second>>
+                requires: []
+                params {}
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::DuplicateDefinition { .. }));
+    }
+
+    #[test]
+    fn declarative_tool_parent_permission() {
+        let src = r#"
+            tool #fetch {
+                description: <<Fetch data>>
+                requires: [^net.read]
+                params {
+                    url :: String
+                }
+            }
+            agent @ok { permits: [^net] tools: [#fetch] }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn declarative_tool_multiple_permissions() {
+        let src = r#"
+            tool #upload {
+                description: <<Upload file>>
+                requires: [^net.write, ^fs.read]
+                params {
+                    path :: String
+                    url :: String
+                }
+            }
+            agent @uploader { permits: [^net.write] tools: [#upload] }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1);
+        match &errors[0] {
+            CheckError::MissingPermission { permission, .. } => {
+                assert_eq!(permission, "fs.read");
+            }
+            _ => panic!("expected MissingPermission"),
+        }
+    }
+
+    // ── Type inference tests ─────────────────────────────────────
+
+    #[test]
+    fn type_inference_no_warnings_for_consistent_types() {
+        let src = r#"
+            flow f(x :: String) -> String {
+                y = "hello"
+                return y
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn type_inference_warns_on_incompatible_reassignment() {
+        let src = r#"
+            flow f() {
+                x = "hello"
+                x = 42
+                return x
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1, "expected 1 error, got: {:?}", errors);
+        assert!(
+            matches!(&errors[0], CheckError::TypeInferenceWarning { variable, expected, found }
+                if variable == "x" && expected == "String" && found == "Int"
+            ),
+            "expected TypeInferenceWarning, got: {:?}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn type_inference_dispatch_return_type() {
+        let src = r#"
+            tool #search {
+                description: <<Search>>
+                requires: []
+                params {
+                    query :: String
+                }
+                returns :: String
+            }
+            agent @bot { permits: [] tools: [#search] }
+            flow f() {
+                result = @bot -> #search("test")
+                result = 42
+                return result
+            }
+        "#;
+        let errors = check_src(src);
+        // The dispatch returns String, then result is reassigned to Int -> warning
+        let inference_warnings: Vec<_> = errors
+            .iter()
+            .filter(|e| matches!(e, CheckError::TypeInferenceWarning { .. }))
+            .collect();
+        assert_eq!(
+            inference_warnings.len(),
+            1,
+            "expected 1 type inference warning, got: {:?}",
+            inference_warnings
+        );
+    }
+}

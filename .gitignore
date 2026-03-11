@@ -1,0 +1,7 @@
+/target
+/pact-out
+.env
+node_modules/
+editors/vscode/out/
+*.vsix
+.DS_Store

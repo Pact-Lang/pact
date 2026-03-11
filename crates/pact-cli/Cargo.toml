@@ -1,0 +1,27 @@
+[package]
+name = "pact-lang"
+version = "0.1.0"
+edition = "2021"
+authors = ["Gabriel Lars Sabadin"]
+description = "PACT — A typed, permission-enforced language for orchestrating AI agents"
+license = "MIT"
+repository = "https://github.com/pact-lang/pact"
+homepage = "https://github.com/pact-lang/pact"
+keywords = ["ai", "agents", "language", "orchestration", "llm"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "../../README.md"
+
+[[bin]]
+name = "pact"
+path = "src/main.rs"
+
+[dependencies]
+pact-core = { path = "../pact-core" }
+pact-build = { path = "../pact-build" }
+pact-dispatch = { path = "../pact-dispatch" }
+pact-mermaid = { path = "../pact-mermaid" }
+clap = { version = "4", features = ["derive"] }
+miette = { version = "7", features = ["fancy"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+notify = { version = "7", features = ["macos_fsevent"] }
+rustyline = "15"

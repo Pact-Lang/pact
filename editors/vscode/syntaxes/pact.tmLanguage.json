@@ -1,0 +1,199 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "PACT",
+  "scopeName": "source.pact",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#prompt-literal" },
+    { "include": "#string" },
+    { "include": "#number" },
+    { "include": "#boolean" },
+    { "include": "#declaration-keyword" },
+    { "include": "#control-keyword" },
+    { "include": "#block-field" },
+    { "include": "#agent-ref" },
+    { "include": "#tool-ref" },
+    { "include": "#skill-ref" },
+    { "include": "#memory-ref" },
+    { "include": "#template-ref" },
+    { "include": "#permission-ref" },
+    { "include": "#type-annotation" },
+    { "include": "#builtin-type" },
+    { "include": "#operator" },
+    { "include": "#identifier" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-dash.pact",
+      "match": "--.*$"
+    },
+    "prompt-literal": {
+      "name": "string.other.prompt.pact",
+      "begin": "<<",
+      "end": ">>",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.prompt.begin.pact" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.prompt.end.pact" }
+      },
+      "patterns": [
+        {
+          "name": "constant.other.placeholder.pact",
+          "match": "\\{[a-zA-Z_][a-zA-Z0-9_]*\\}"
+        },
+        {
+          "name": "markup.heading.section-label.pact",
+          "match": "\\b[A-Z][A-Z_ ]*[A-Z]:"
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.pact",
+      "begin": "\"",
+      "end": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.pact" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.pact" }
+      },
+      "patterns": [
+        {
+          "name": "constant.character.escape.pact",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "number": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.pact",
+          "match": "\\b[0-9]+\\.[0-9]+\\b"
+        },
+        {
+          "name": "constant.numeric.integer.pact",
+          "match": "\\b[0-9]+\\b"
+        }
+      ]
+    },
+    "boolean": {
+      "name": "constant.language.pact",
+      "match": "\\b(true|false)\\b"
+    },
+    "declaration-keyword": {
+      "name": "keyword.declaration.pact",
+      "match": "\\b(agent_bundle|agent|tool|flow|schema|type|permit_tree|test|skill|import|template|directive)\\b"
+    },
+    "control-keyword": {
+      "name": "keyword.control.pact",
+      "match": "\\b(return|fail|match|parallel|record|assert|on|if|else)\\b"
+    },
+    "block-field": {
+      "name": "variable.other.property.pact",
+      "match": "\\b(permits|tools|requires|params|returns|description|handler|prompt|model|agents|fallbacks|strategy|memory|skills|source|output|directives|section)\\s*(?=:|\\s*\\{|\\s*::|\\s+[A-Z])"
+    },
+    "agent-ref": {
+      "match": "(@)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.sigil.agent.pact" },
+        "2": { "name": "entity.name.type.agent.pact" }
+      }
+    },
+    "tool-ref": {
+      "match": "(#)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.sigil.tool.pact" },
+        "2": { "name": "entity.name.function.tool.pact" }
+      }
+    },
+    "skill-ref": {
+      "match": "(\\$)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.sigil.skill.pact" },
+        "2": { "name": "entity.name.tag.skill.pact" }
+      }
+    },
+    "memory-ref": {
+      "match": "(~)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.sigil.memory.pact" },
+        "2": { "name": "variable.other.memory.pact" }
+      }
+    },
+    "template-ref": {
+      "match": "(%)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.sigil.template.pact" },
+        "2": { "name": "entity.name.type.template.pact" }
+      }
+    },
+    "permission-ref": {
+      "match": "(\\^)([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*)",
+      "captures": {
+        "1": { "name": "punctuation.definition.sigil.permission.pact" },
+        "2": { "name": "entity.name.label.permission.pact" }
+      }
+    },
+    "type-annotation": {
+      "match": "(::)\\s*([A-Z][a-zA-Z0-9_]*)(?:<([A-Z][a-zA-Z0-9_]*)>)?",
+      "captures": {
+        "1": { "name": "keyword.operator.type-annotation.pact" },
+        "2": { "name": "support.type.pact" },
+        "3": { "name": "support.type.pact" }
+      }
+    },
+    "builtin-type": {
+      "name": "support.type.pact",
+      "match": "\\b(String|Int|Float|Bool|List|Map|Void|Any|Record)\\b"
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.dispatch.pact",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.pipeline.pact",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.fallback.pact",
+          "match": "\\?>"
+        },
+        {
+          "name": "keyword.operator.type-annotation.pact",
+          "match": "::"
+        },
+        {
+          "name": "keyword.operator.fat-arrow.pact",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.comparison.pact",
+          "match": "==|!=|<=|>="
+        },
+        {
+          "name": "keyword.operator.assignment.pact",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.arithmetic.pact",
+          "match": "[+\\-*/]"
+        },
+        {
+          "name": "keyword.operator.comparison.pact",
+          "match": "[<>]"
+        },
+        {
+          "name": "keyword.operator.union.pact",
+          "match": "\\|"
+        }
+      ]
+    },
+    "identifier": {
+      "name": "variable.other.pact",
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+    }
+  }
+}

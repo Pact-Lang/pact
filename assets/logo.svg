@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 200">
+  <defs>
+    <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+  </defs>
+  <!-- Icon: ^ caret in rounded square -->
+  <rect x="0" y="20" width="160" height="160" rx="34" ry="34" fill="url(#grad)"/>
+  <path d="M80 60 L120 120 L112 120 L80 72 L48 120 L40 120 Z" fill="white" opacity="0.95"/>
+  <rect x="40" y="136" width="80" height="3" rx="1.5" fill="white" opacity="0.4"/>
+  <!-- Wordmark -->
+  <text x="192" y="138" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="120" font-weight="700" letter-spacing="-4" fill="white">PACT</text>
+</svg>

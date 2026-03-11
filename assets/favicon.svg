@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea"/>
+      <stop offset="100%" style="stop-color:#764ba2"/>
+    </linearGradient>
+    <linearGradient id="caret" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.95"/>
+      <stop offset="100%" style="stop-color:#e0e0ff;stop-opacity:1"/>
+    </linearGradient>
+  </defs>
+  <!-- Square background, no rounded corners -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- ^ caret sigil -->
+  <path d="M256 128 L368 304 L336 304 L256 176 L176 304 L144 304 Z" fill="url(#caret)"/>
+  <!-- Subtle horizontal line under caret -->
+  <rect x="144" y="336" width="224" height="6" rx="3" fill="white" opacity="0.4"/>
+</svg>

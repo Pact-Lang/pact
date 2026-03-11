@@ -1,0 +1,64 @@
+{
+  "name": "pact-lang",
+  "displayName": "PACT Language",
+  "description": "Language support for PACT — Programmable Agent Contract Toolkit",
+  "version": "0.1.0",
+  "publisher": "pact-lang",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:pact"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "pact",
+        "aliases": [
+          "PACT",
+          "pact"
+        ],
+        "extensions": [
+          ".pact"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pact",
+        "scopeName": "source.pact",
+        "path": "./syntaxes/pact.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "PACT",
+      "properties": {
+        "pact.lspPath": {
+          "type": "string",
+          "default": "/Users/gabrielsabadin/Documents/Projects/Own/Pact/target/release/pact-lsp",
+          "description": "Path to the pact-lsp binary"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "@types/vscode": "^1.75.0",
+    "@vscode/vsce": "^2.0.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.0.0"
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  }
+}

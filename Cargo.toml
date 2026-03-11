@@ -1,0 +1,9 @@
+[workspace]
+members = ["crates/pact-core", "crates/pact-build", "crates/pact-dispatch", "crates/pact-cli", "crates/pact-mermaid", "crates/pact-mcp", "crates/pact-lsp"]
+resolver = "2"
+
+[workspace.metadata]
+repository = "https://github.com/pact-lang/pact"
+homepage = "https://github.com/pact-lang/pact"
+license = "MIT"
+authors = ["Gabriel Lars Sabadin"]
