@@ -1,6 +1,23 @@
-# PACT -- Programmable Agent Contract Toolkit
+<div align="center">
 
-> A typed, permission-enforced language for orchestrating AI agents.
+<img src="assets/favicon.png" width="120" alt="PACT Logo">
+
+# PACT
+
+### Programmable Agent Contract Toolkit
+
+A typed, permission-enforced language for orchestrating AI agents.
+
+[![CI](https://github.com/Pact-Lang/pact/actions/workflows/ci.yml/badge.svg)](https://github.com/Pact-Lang/pact/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/pact-lang.svg)](https://crates.io/crates/pact-lang)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub Stars](https://img.shields.io/github/stars/Pact-Lang/pact?style=social)](https://github.com/Pact-Lang/pact)
+
+[Website](https://pactlang.dev) &bull; [Get Started](#quick-start) &bull; [Examples](#examples) &bull; [Docs](#cli-reference) &bull; [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
 
 PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. The result: AI agent systems you can reason about, audit, and trust.
 
@@ -8,22 +25,27 @@ PACT is a **language**, not a library. Where frameworks bolt safety onto Python 
 
 | | PACT | LangChain | CrewAI | AutoGen |
 |---|---|---|---|---|
-| Language vs Library | Language | Python lib | Python lib | Python lib |
-| Type safety | Built-in (`::`) | None | None | None |
-| Permission system | First-class (`^`) | Manual | None | None |
-| Agent contracts | Enforced at compile-time | Runtime only | Runtime only | Runtime only |
-| Composable prompts | Templates + Directives | String concatenation | String templates | String templates |
-| Source providers | Declarative (`source:`) | Raw HTTP calls | Manual | Manual |
-| Auto-guardrails | GDPR, HIPAA, PCI-DSS | Manual | None | None |
-| Multi-backend | Claude, OpenAI, Ollama | Many | OpenAI | Many |
-| Tooling | LSP, VS Code, formatter | IDE plugins | None | None |
+| Language vs Library | **Language** | Python lib | Python lib | Python lib |
+| Type safety | **Built-in** (`::`) | None | None | None |
+| Permission system | **First-class** (`^`) | Manual | None | None |
+| Agent contracts | **Enforced at compile-time** | Runtime only | Runtime only | Runtime only |
+| Composable prompts | **Templates + Directives** | String concatenation | String templates | String templates |
+| Source providers | **Declarative** (`source:`) | Raw HTTP calls | Manual | Manual |
+| Auto-guardrails | **GDPR, HIPAA, PCI-DSS** | Manual | None | None |
+| Multi-backend | **Claude, OpenAI, Ollama** | Many | OpenAI | Many |
+| Tooling | **LSP, VS Code, formatter** | IDE plugins | None | None |
 
 ## Quick Start
 
 ```bash
-# Install
+# Install via Cargo
 cargo install pact-lang
 
+# Or via Homebrew (macOS / Linux)
+brew tap pact-lang/tap && brew install pact-lang
+```
+
+```bash
 # Scaffold a new project
 pact init my_agent.pact
 
@@ -47,7 +69,7 @@ pact playground --load examples/research_flow.pact
 
 ## The Language at a Glance
 
-Here is a complete, working PACT program -- a research agent that searches the web, summarizes findings, and drafts a report:
+A complete, working PACT program -- a research agent that searches the web, summarizes findings, and drafts a report:
 
 ```pact
 permit_tree {
@@ -216,10 +238,15 @@ flow safe_search(query :: String) -> String {
 
 | File | Description |
 |------|-------------|
-| `hello_agent.pact` | Minimal agent with a single tool and flow |
-| `research_flow.pact` | Multi-agent research with fallback chains |
-| `website_builder.pact` | Bilingual website generator with templates, directives, and source providers |
-| `age_verified_website.pact` | Age-gated content with compliance guardrails |
+| [`hello_agent.pact`](examples/hello_agent.pact) | Minimal agent with a single tool and flow |
+| [`research_flow.pact`](examples/research_flow.pact) | Multi-agent research with fallback chains |
+| [`website_builder.pact`](examples/website_builder.pact) | Bilingual website generator with templates, directives, and source providers |
+| [`rag_pipeline.pact`](examples/rag_pipeline.pact) | Retrieval-augmented generation with citations and quality checking |
+| [`code_review.pact`](examples/code_review.pact) | AI-powered code reviewer with security analysis |
+| [`customer_support.pact`](examples/customer_support.pact) | Intent classification with match expressions and memory |
+| [`data_analyst.pact`](examples/data_analyst.pact) | Data pipeline with fetch, clean, and insight generation |
+| [`ci_agent.pact`](examples/ci_agent.pact) | CI/CD pipeline agent with shell execution |
+| [`age_verified_website.pact`](examples/age_verified_website.pact) | Age-gated content with compliance guardrails |
 
 Run any example:
 
@@ -266,25 +293,64 @@ Write 10 lines of PACT. Get production-grade guardrails for free.
   └─────────┘
 ```
 
-The checker runs two passes: name collection, then validation. Permission violations, type mismatches, and undefined references are all caught before execution. The dispatcher supports mock mode for development and real API dispatch for Claude, OpenAI, and Ollama.
+Seven crates, one workspace:
+
+| Crate | Purpose |
+|-------|---------|
+| `pact-core` | Lexer, parser, AST, checker, interpreter, formatter, docs |
+| `pact-build` | Build pipeline: TOML, Markdown, Claude JSON, guardrails |
+| `pact-dispatch` | Runtime: API clients, tool execution, retry, cache, mediation |
+| `pact-cli` | CLI binary: check, run, fmt, doc, playground |
+| `pact-lsp` | Language Server Protocol for editor integration |
+| `pact-mermaid` | Bidirectional Mermaid diagram conversion |
+| `pact-mcp` | Model Context Protocol server |
 
 ## Editor Support
 
 ### VS Code
 
-The `pact-lang` extension provides syntax highlighting and LSP integration:
+The `pact-lang` VS Code extension gives you a full development environment for `.pact` files.
+
+**What you get:**
+
+- Syntax highlighting for all sigils (`@`, `#`, `$`, `~`, `^`, `%`), keywords, types, and `<<prompt>>` literals
+- Parameter interpolation highlighting inside prompts (`{param_name}`)
+- Section label highlighting inside prompts (`DESIGN:`, `LAYOUT:`)
+- Real-time error diagnostics with source locations and fix suggestions
+- Hover information for agents, tools, templates, directives, and permissions
+- Auto-completion for sigils, keywords, types, and references
+- Go-to-definition support
+
+**Install from source:**
 
 ```bash
+# 1. Build the LSP server
+cd /path/to/pact
+cargo build --release --bin pact-lsp
+
+# 2. Build the VS Code extension
 cd editors/vscode
-npm install && npm run compile
-# Install via "Extensions: Install from VSIX" in VS Code
+npm install
+npm run compile
+
+# 3. Package as VSIX
+npx vsce package
+
+# 4. Install in VS Code
+#    Cmd+Shift+P > "Extensions: Install from VSIX" > select the .vsix file
 ```
 
-Configure the LSP path in settings if needed:
+**Configure the LSP:**
+
+Add to your VS Code `settings.json`:
 
 ```json
-{ "pact.lspPath": "/path/to/pact-lsp" }
+{
+    "pact.lspPath": "/path/to/pact/target/release/pact-lsp"
+}
 ```
+
+The extension auto-starts the language server when you open a `.pact` file. Errors appear inline as you type — the same compile-time permission checks and type validation you get from `pact check`, but live in your editor.
 
 ## CLI Reference
 
@@ -294,6 +360,7 @@ Configure the LSP path in settings if needed:
 | `pact check <file>` | Type-check and validate permissions |
 | `pact build <file> [--out-dir dir]` | Compile to TOML, Markdown, and Claude JSON |
 | `pact run <file> --flow <name>` | Execute a flow (add `--dispatch claude` for real API) |
+| `pact run <file> --flow <name> --stream` | Stream output in real-time |
 | `pact test <file>` | Run all `test` declarations |
 | `pact fmt <file> [--write]` | Format a `.pact` file |
 | `pact doc <file> [-o file]` | Generate Markdown documentation |
@@ -324,12 +391,46 @@ Configure the LSP path in settings if needed:
 - [x] Real dispatch -- Claude API with tool-use conversation loop
 - [x] Runtime mediation -- compliance validation on every tool call
 - [x] Developer tooling -- formatter, doc generator, playground, LSP
+- [x] Streaming -- real-time token output via SSE
+- [x] Mermaid integration -- bidirectional diagram conversion
 - [ ] Package registry -- share and reuse templates, directives, tools
-- [ ] Streaming responses -- real-time agent output
 - [ ] WASM compilation -- run PACT in the browser
 - [ ] Visual editor -- drag-and-drop flow builder
 - [ ] MCP integration -- Model Context Protocol support
+- [ ] Debug mode -- step through flows, inspect agent state
+
+## Contact and Discussion
+
+- **Issues** -- Submit bugs, feature requests, or design discussions through [GitHub Issues](https://github.com/Pact-Lang/pact/issues)
+- **Contributing** -- See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines
+- **Security** -- Report vulnerabilities privately via [SECURITY.md](SECURITY.md)
+
+## Sponsorship
+
+If PACT is useful to you or your organization, consider sponsoring the project to support continued development:
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-PACT-ea4aaa?logo=github-sponsors)](https://github.com/sponsors/gabriel-pact-lang)
+
+Your support helps fund new features, documentation, and community growth.
+
+## Star History
+
+<a href="https://star-history.com/#Pact-Lang/pact&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Pact-Lang/pact&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Pact-Lang/pact&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Pact-Lang/pact&type=Date" />
+ </picture>
+</a>
 
 ## License
 
 MIT -- Copyright (c) 2025-2026 Gabriel Lars Sabadin
+
+---
+
+<div align="center">
+
+**[pactlang.dev](https://pactlang.dev)**
+
+</div>

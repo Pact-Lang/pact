@@ -1,0 +1,78 @@
+# PACT -- Programmable Agent Contract Toolkit
+
+> A typed, permission-enforced language for orchestrating AI agents.
+
+PACT is a programming language (not a library or framework) for building AI agent systems with compile-time safety guarantees. It is written in Rust and provides a compiler, runtime, LSP, and CLI toolchain.
+
+## Key Concepts
+
+- **Agents** (`@name`): Entities that execute tools with declared permissions
+- **Tools** (`#name`): Functions that agents can call, with required permissions and typed parameters
+- **Permissions** (`^name`): Capabilities that agents must have to use tools, enforced at compile time
+- **Templates** (`%name`): Reusable output format specifications for structured LLM responses
+- **Directives** (`%name`): Composable, parameterized prompt blocks
+- **Flows**: Multi-step agent orchestration with dispatch (`->`), pipelines (`|>`), and fallbacks (`?>`)
+- **Source Providers**: Built-in, declarative data access (e.g., `^search.duckduckgo`, `^fs.read`)
+- **Guardrails**: Automatic compliance boundaries (GDPR, HIPAA, PCI-DSS, COPPA) injected from permission declarations
+
+## Sigils
+
+| Sigil | Meaning | Example |
+|-------|---------|---------|
+| `@` | Agent | `@researcher` |
+| `#` | Tool | `#web_search` |
+| `$` | Skill | `$summarize` |
+| `~` | Memory | `~conversation` |
+| `^` | Permission | `^net.read` |
+| `%` | Template / Directive | `%report_format` |
+
+## Install
+
+```bash
+cargo install pact-lang
+```
+
+## Example
+
+```pact
+permit_tree {
+    ^net  { ^net.read }
+    ^llm  { ^llm.query }
+}
+
+tool #search {
+    requires: [^net.read]
+    source: ^search.duckduckgo(query)
+    params { query :: String }
+    returns :: List<String>
+}
+
+agent @researcher {
+    permits: [^net.read, ^llm.query]
+    tools: [#search]
+    model: "claude-sonnet-4-20250514"
+}
+
+flow research(topic :: String) -> String {
+    results = @researcher -> #search(topic)
+    return results
+}
+```
+
+## CLI Commands
+
+- `pact init` -- scaffold a new .pact file
+- `pact check` -- type-check and validate permissions
+- `pact run` -- execute a flow (supports Claude, OpenAI, Ollama backends)
+- `pact build` -- compile to TOML, Markdown, Claude JSON
+- `pact fmt` -- format source code
+- `pact doc` -- generate documentation
+- `pact test` -- run test declarations
+- `pact playground` -- interactive REPL
+
+## Links
+
+- Website: https://pactlang.dev
+- GitHub: https://github.com/Pact-Lang/pact
+- Crates.io: https://crates.io/crates/pact-lang
+- License: MIT
