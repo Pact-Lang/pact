@@ -282,8 +282,8 @@ fn to_mermaid_contains_flowchart() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("flowchart") || stdout.contains("graph") || stdout.contains("-->"),
-        "pact to-mermaid output should contain Mermaid diagram syntax, got: {}",
+        stdout.contains("agentflow") || stdout.contains("toolDefinition") || stdout.contains("agentDefinition"),
+        "pact to-mermaid output should contain agentflow diagram syntax, got: {}",
         stdout,
     );
 }
@@ -294,7 +294,7 @@ fn to_mermaid_contains_flowchart() {
 fn from_mermaid_produces_pact_constructs() {
     let output = pact_cmd()
         .arg("from-mermaid")
-        .arg(example("incident_response.agentflow.mmd"))
+        .arg(example("test_roundtrip.agentflow.mmd"))
         .output()
         .expect("failed to execute pact from-mermaid");
 

@@ -8,7 +8,7 @@
 
 use crate::agentflow::*;
 use pact_core::ast::expr::ExprKind;
-use pact_core::ast::stmt::{DeclKind, Program, TemplateEntry};
+use pact_core::ast::stmt::{DeclKind, FlowDecl, Program, TemplateEntry};
 use std::collections::BTreeMap;
 
 /// Convert a PACT `Program` into agentflow text.
@@ -183,11 +183,21 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
                     fallbacks,
                 });
             }
+            DeclKind::TypeAlias(ta) => {
+                graph.type_aliases.push(AgentFlowTypeAlias {
+                    name: ta.name.clone(),
+                    variants: ta.variants.clone(),
+                });
+            }
             DeclKind::Flow(f) => {
                 // Extract edges from flow body.
                 let mut flow_edges = Vec::new();
                 extract_flow_edges(&f.body, &mut flow_edges);
                 graph.edges.extend(flow_edges);
+
+                // Extract flow steps for task-based emission.
+                let flow_def = extract_flow_def(f);
+                graph.flows.push(flow_def);
             }
             _ => {}
         }
@@ -315,6 +325,50 @@ fn extract_flow_edges(
                 prev_tool = Some((name, tool_name));
             }
         }
+    }
+}
+
+/// Extract a flow definition with its steps from a FlowDecl.
+fn extract_flow_def(f: &FlowDecl) -> AgentFlowDef {
+    let mut steps = Vec::new();
+    for expr in &f.body {
+        if let ExprKind::Assign { name, value } = &expr.kind {
+            if let Some((agent_name, tool_name, args)) = extract_full_dispatch_info(value) {
+                steps.push(AgentFlowStep {
+                    output_var: name.clone(),
+                    agent: agent_name,
+                    tool: tool_name,
+                    args,
+                });
+            }
+        }
+    }
+    AgentFlowDef {
+        name: f.name.clone(),
+        steps,
+    }
+}
+
+/// Extract agent name, tool name, and argument names from a dispatch expression.
+fn extract_full_dispatch_info(
+    expr: &pact_core::ast::expr::Expr,
+) -> Option<(String, String, Vec<String>)> {
+    match &expr.kind {
+        ExprKind::AgentDispatch { agent, tool, args } => {
+            let agent_name = match &agent.kind {
+                ExprKind::AgentRef(name) => name.clone(),
+                _ => return None,
+            };
+            let tool_name = match &tool.kind {
+                ExprKind::ToolRef(name) => name.clone(),
+                _ => return None,
+            };
+            Some((agent_name, tool_name, extract_arg_names(args)))
+        }
+        ExprKind::Pipeline { left, right } => {
+            extract_full_dispatch_info(right).or_else(|| extract_full_dispatch_info(left))
+        }
+        _ => None,
     }
 }
 
@@ -468,267 +522,238 @@ fn emit_agentflow_text(graph: &AgentFlowGraph) -> String {
     let mut out = String::new();
     out.push_str(&format!("agentflow {}\n", graph.direction));
 
-    // Schemas.
-    for schema in &graph.schemas {
-        out.push_str(&format!(
-            "    {}{{{{\"{}\"}}}}{}\n",
-            schema.id,
-            schema.label,
-            format_metadata_block(&schema_meta_to_kv(&schema.metadata))
-        ));
-    }
+    // ── Types: schemas as Record types ─────────────────────────────────────
+    if !graph.schemas.is_empty() || !graph.type_aliases.is_empty() {
+        for schema in &graph.schemas {
+            out.push_str(&format!("  type {} = Record {{\n", schema.id));
+            for (name, ty) in &schema.metadata.fields {
+                out.push_str(&format!("    {}: {}\n", name, ty));
+            }
+            out.push_str("  }\n\n");
+        }
 
-    // Templates.
-    for tpl in &graph.templates {
-        out.push_str(&format!(
-            "    {}[[\"{}\"]]{}\n",
-            tpl.id,
-            tpl.label,
-            format_metadata_block(&template_meta_to_kv(&tpl.metadata))
-        ));
-    }
-
-    // Directives.
-    for dir in &graph.directives {
-        out.push_str(&format!(
-            "    {}[/\"{}\"/]{}\n",
-            dir.id,
-            dir.label,
-            format_metadata_block(&directive_meta_to_kv(&dir.metadata))
-        ));
-    }
-
-    if !graph.schemas.is_empty() || !graph.templates.is_empty() || !graph.directives.is_empty() {
+        for ta in &graph.type_aliases {
+            out.push_str(&format!(
+                "  type {} = {}\n",
+                ta.name,
+                ta.variants.join(" | ")
+            ));
+        }
         out.push('\n');
     }
 
-    // Agents.
-    for agent in &graph.agents {
+    // ── Templates (TBD: Mermaid syntax pending) ─────────────────────────────
+    for tpl in &graph.templates {
         out.push_str(&format!(
-            "    subgraph {}[\"{}\"]\n",
-            agent.id, agent.label
+            "  %% template {}: {}\n",
+            tpl.id,
+            tpl.metadata
+                .fields
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
-        out.push_str("        direction LR\n\n");
+    }
+    if !graph.templates.is_empty() {
+        out.push('\n');
+    }
 
+    // ── Directives (TBD: Mermaid syntax pending) ──────────────────────────
+    for dir in &graph.directives {
+        out.push_str(&format!("  %% directive {}\n", dir.id));
+    }
+    if !graph.directives.is_empty() {
+        out.push('\n');
+    }
+
+    // ── Tools: flat top-level definitions ──────────────────────────────────
+    for agent in &graph.agents {
         for tool in &agent.nodes {
-            let meta_kv = tool_meta_to_kv(&tool.metadata);
+            out.push_str(&format!("  {}@{{\n", tool.id));
+            out.push_str("    toolDefinition: true\n");
+            out.push_str("    shape: subroutine\n");
             out.push_str(&format!(
-                "        {}[\"{}\"]{}\n",
-                tool.id,
-                tool.label,
-                format_metadata_block(&meta_kv)
+                "    description: \"{}\"\n",
+                tool.metadata.description.replace('"', "\\\"")
             ));
+            if !tool.metadata.requires.is_empty() {
+                let perms: Vec<String> = tool
+                    .metadata
+                    .requires
+                    .iter()
+                    .map(|r| r.strip_prefix('^').unwrap_or(r).to_string())
+                    .collect();
+                out.push_str(&format!("    requires: \"{}\"\n", perms.join(", ")));
+            }
+            if let Some(output) = &tool.metadata.output {
+                out.push_str(&format!("    output: \"{}\"\n", output));
+            }
+            if !tool.metadata.directives.is_empty() {
+                out.push_str(&format!(
+                    "    directives: \"{}\"\n",
+                    tool.metadata.directives.join(", ")
+                ));
+            }
+            if !tool.metadata.params.is_empty() {
+                out.push_str("    params:\n");
+                for (name, ty) in &tool.metadata.params {
+                    out.push_str(&format!("      {}: {}\n", name, ty));
+                }
+            }
+            if let Some(returns) = &tool.metadata.returns {
+                out.push_str(&format!("    returns: \"{}\"\n", returns));
+            }
+            out.push_str("  }\n\n");
+        }
+    }
+
+    // ── Agents: grouped under agent bundle or standalone ───────────────────
+    // Emit bundles first — agents inside bundles.
+    let bundled_agents: Vec<&str> = graph
+        .bundles
+        .iter()
+        .flat_map(|b| b.agents.iter().map(|s| s.as_str()))
+        .collect();
+
+    for bundle in &graph.bundles {
+        out.push_str(&format!(
+            "  agent {}[\"{}\"]\n",
+            bundle.id,
+            to_title_case(&bundle.id)
+        ));
+
+        for agent in &graph.agents {
+            if bundle.agents.contains(&agent.id) {
+                emit_agent_definition(&mut out, agent);
+            }
         }
 
-        for skill in &agent.skills {
-            let meta_kv = skill_meta_to_kv(&skill.metadata);
-            out.push_str(&format!(
-                "        {}([\"{}\"]){}\n",
-                skill.id,
-                skill.label,
-                format_metadata_block(&meta_kv)
-            ));
-        }
+        out.push_str("  end\n\n");
+    }
 
+    // Emit unbundled agents.
+    for agent in &graph.agents {
+        if !bundled_agents.contains(&agent.id.as_str()) {
+            emit_agent_definition(&mut out, agent);
+        }
+    }
+
+    // ── Flows: task-based blocks ──────────────────────────────────────────
+    for flow in &graph.flows {
+        emit_flow_tasks(&mut out, flow, graph);
+    }
+
+    out
+}
+
+/// Emit an agent definition in the new `@{ agentDefinition: true }` format.
+fn emit_agent_definition(out: &mut String, agent: &AgentFlowAgent) {
+    out.push_str(&format!("\n    {}@{{\n", agent.id));
+    out.push_str("      agentDefinition: true\n");
+    out.push_str("      shape: hex\n");
+    if let Some(model) = &agent.model {
+        out.push_str(&format!("      model: \"{}\"\n", model));
+    }
+
+    // Collect permissions from tools.
+    let mut permits = Vec::new();
+    for tool in &agent.nodes {
+        for perm in &tool.metadata.requires {
+            let p = perm.strip_prefix('^').unwrap_or(perm);
+            if !permits.contains(&p) {
+                permits.push(p);
+            }
+        }
+    }
+    if !permits.is_empty() {
+        out.push_str(&format!("      permits: \"{}\"\n", permits.join(", ")));
+    }
+
+    let tool_names: Vec<&str> = agent.nodes.iter().map(|t| t.id.as_str()).collect();
+    if !tool_names.is_empty() {
+        out.push_str(&format!("      tools: \"{}\"\n", tool_names.join(", ")));
+    }
+
+    if let Some(prompt) = &agent.prompt {
+        out.push_str(&format!(
+            "      prompt: \"{}\"\n",
+            prompt.replace('"', "\\\"")
+        ));
+    }
+
+    out.push_str("    }\n");
+}
+
+/// Emit flow definitions as task blocks with agent/tool/output triplets.
+fn emit_flow_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlowGraph) {
+    use std::collections::HashMap;
+
+    out.push_str(&format!("  flow {}\n", flow.name));
+
+    // Build var->step index for fan-in detection.
+    let mut var_to_step: HashMap<String, usize> = HashMap::new();
+    for (i, step) in flow.steps.iter().enumerate() {
+        var_to_step.insert(step.output_var.clone(), i);
+    }
+
+    // Emit each step as a task block.
+    for (i, step) in flow.steps.iter().enumerate() {
+        let step_label = format!("Step{}", i + 1);
+        out.push_str(&format!("    task {}\n", step_label));
+        out.push_str("      direction TB\n");
+        out.push_str(&format!(
+            "      a_{}{{{{{}}}}}@{{ agent: {} }} --- {}@{{ shape: subroutine }}\n",
+            step.agent, step.agent, step.agent, step.tool
+        ));
+        out.push_str(&format!(
+            "      a_{} --o {}@{{ shape: doc }}\n",
+            step.agent, step.output_var
+        ));
         out.push_str("    end\n\n");
     }
 
-    // Reference edges (dashed).
-    let ref_edges: Vec<&AgentFlowEdge> = graph
-        .edges
-        .iter()
-        .filter(|e| e.edge_type == EdgeType::Reference)
-        .collect();
-    if !ref_edges.is_empty() {
-        for edge in &ref_edges {
-            out.push_str(&format!("    {} -.-> {}\n", edge.from, edge.to));
-        }
-        out.push('\n');
+    // Emit linear chain edges between steps.
+    for i in 0..flow.steps.len().saturating_sub(1) {
+        let label = &flow.steps[i].output_var;
+        out.push_str(&format!(
+            "    Step{} -->|\"{}\"| Step{}\n",
+            i + 1,
+            label,
+            i + 2
+        ));
     }
 
-    // Flow edges (solid).
-    let flow_edges: Vec<&AgentFlowEdge> = graph
-        .edges
-        .iter()
-        .filter(|e| e.edge_type == EdgeType::Flow)
-        .collect();
-    if !flow_edges.is_empty() {
-        for edge in &flow_edges {
-            if let Some(label) = &edge.label {
-                out.push_str(&format!(
-                    "    {} -->|\"{}\"| {}\n",
-                    edge.from, label, edge.to
-                ));
-            } else {
-                out.push_str(&format!("    {} --> {}\n", edge.from, edge.to));
-            }
-        }
-    }
-
-    out
-}
-
-// ── Metadata formatting ────────────────────────────────────────────────────
-
-/// Key-value pair for metadata emission. Supports nested "params:" blocks.
-enum MetaEntry {
-    Simple(String, String),
-    Array(String, Vec<String>),
-    Nested(String, Vec<(String, String)>),
-}
-
-fn format_metadata_block(entries: &[MetaEntry]) -> String {
-    if entries.is_empty() {
-        return String::new();
-    }
-
-    let mut out = String::new();
-    out.push_str("@{\n");
-
-    for entry in entries {
-        match entry {
-            MetaEntry::Simple(k, v) => {
-                out.push_str(&format!("        {}: \"{}\"\n", k, v));
-            }
-            MetaEntry::Array(k, items) => {
-                let formatted: Vec<String> = items.iter().map(|i| format!("\"{}\"", i)).collect();
-                out.push_str(&format!("        {}: [{}]\n", k, formatted.join(", ")));
-            }
-            MetaEntry::Nested(k, pairs) => {
-                out.push_str(&format!("        {}:\n", k));
-                for (name, ty) in pairs {
-                    out.push_str(&format!("            {}: \"{}\"\n", name, ty));
+    // Emit fan-in edges: find steps that consume non-immediate-predecessor variables.
+    for (i, step) in flow.steps.iter().enumerate() {
+        let mut fan_in_args: Vec<&String> = Vec::new();
+        for arg in &step.args {
+            if let Some(&src_idx) = var_to_step.get(arg) {
+                // Skip if it's the immediate predecessor (already covered by linear chain).
+                if i > 0 && src_idx == i - 1 {
+                    continue;
                 }
+                // Skip if it's a flow parameter (not produced by any step).
+                fan_in_args.push(arg);
+            }
+        }
+
+        if !fan_in_args.is_empty() {
+            out.push_str(&format!("\n    %% Fan-in for Step{}\n", i + 1));
+            // The immediate predecessor step carries all fan-in data.
+            let prev_step = format!("Step{}", i);
+            for arg in fan_in_args {
+                out.push_str(&format!(
+                    "    {} -->|\"{}\"| Step{}\n",
+                    prev_step, arg, i + 1
+                ));
             }
         }
     }
 
-    out.push_str("    }");
-    out
+    out.push('\n');
 }
 
-fn tool_meta_to_kv(meta: &ToolMetadata) -> Vec<MetaEntry> {
-    let mut entries = Vec::new();
-
-    entries.push(MetaEntry::Simple(
-        "description".to_string(),
-        meta.description.clone(),
-    ));
-
-    if !meta.requires.is_empty() {
-        entries.push(MetaEntry::Array(
-            "requires".to_string(),
-            meta.requires.clone(),
-        ));
-    }
-
-    if !meta.deny.is_empty() {
-        entries.push(MetaEntry::Array("deny".to_string(), meta.deny.clone()));
-    }
-
-    if let Some(source) = &meta.source {
-        entries.push(MetaEntry::Simple("source".to_string(), source.clone()));
-    }
-
-    if let Some(handler) = &meta.handler {
-        entries.push(MetaEntry::Simple("handler".to_string(), handler.clone()));
-    }
-
-    if let Some(output) = &meta.output {
-        entries.push(MetaEntry::Simple("output".to_string(), output.clone()));
-    }
-
-    if !meta.directives.is_empty() {
-        entries.push(MetaEntry::Array(
-            "directives".to_string(),
-            meta.directives.clone(),
-        ));
-    }
-
-    if !meta.params.is_empty() {
-        let pairs: Vec<(String, String)> = meta.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        entries.push(MetaEntry::Nested("params".to_string(), pairs));
-    }
-
-    if let Some(returns) = &meta.returns {
-        entries.push(MetaEntry::Simple("returns".to_string(), returns.clone()));
-    }
-
-    if let Some(retry) = meta.retry {
-        entries.push(MetaEntry::Simple("retry".to_string(), retry.to_string()));
-    }
-
-    if let Some(cache) = &meta.cache {
-        entries.push(MetaEntry::Simple("cache".to_string(), cache.clone()));
-    }
-
-    if let Some(validate) = &meta.validate {
-        entries.push(MetaEntry::Simple("validate".to_string(), validate.clone()));
-    }
-
-    entries
-}
-
-fn skill_meta_to_kv(meta: &SkillMetadata) -> Vec<MetaEntry> {
-    let mut entries = Vec::new();
-
-    entries.push(MetaEntry::Simple(
-        "description".to_string(),
-        meta.description.clone(),
-    ));
-
-    if !meta.tools.is_empty() {
-        entries.push(MetaEntry::Array("tools".to_string(), meta.tools.clone()));
-    }
-
-    if let Some(strategy) = &meta.strategy {
-        entries.push(MetaEntry::Simple("strategy".to_string(), strategy.clone()));
-    }
-
-    if !meta.params.is_empty() {
-        let pairs: Vec<(String, String)> = meta.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        entries.push(MetaEntry::Nested("params".to_string(), pairs));
-    }
-
-    if let Some(returns) = &meta.returns {
-        entries.push(MetaEntry::Simple("returns".to_string(), returns.clone()));
-    }
-
-    entries
-}
-
-fn schema_meta_to_kv(meta: &SchemaMetadata) -> Vec<MetaEntry> {
-    if meta.fields.is_empty() {
-        return vec![];
-    }
-    let pairs: Vec<(String, String)> = meta.fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    vec![MetaEntry::Nested("fields".to_string(), pairs)]
-}
-
-fn template_meta_to_kv(meta: &TemplateMetadata) -> Vec<MetaEntry> {
-    let mut entries = Vec::new();
-    if !meta.fields.is_empty() {
-        let pairs: Vec<(String, String)> = meta.fields.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        entries.push(MetaEntry::Nested("fields".to_string(), pairs));
-    }
-    if !meta.sections.is_empty() {
-        entries.push(MetaEntry::Array(
-            "sections".to_string(),
-            meta.sections.clone(),
-        ));
-    }
-    entries
-}
-
-fn directive_meta_to_kv(meta: &DirectiveMetadata) -> Vec<MetaEntry> {
-    let mut entries = Vec::new();
-    entries.push(MetaEntry::Simple("text".to_string(), meta.text.clone()));
-    if !meta.params.is_empty() {
-        let pairs: Vec<(String, String)> = meta.params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        entries.push(MetaEntry::Nested("params".to_string(), pairs));
-    }
-    entries
-}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -789,10 +814,11 @@ mod tests {
         let program = parse_program(src);
         let text = pact_to_agentflow(&program);
         assert!(text.starts_with("agentflow LR\n"));
-        assert!(text.contains("subgraph researcher[\"@researcher\"]"));
-        assert!(text.contains("search[\"Search\"]"));
-        assert!(text.contains("description"));
-        assert!(text.contains("end"));
+        assert!(text.contains("search@{"));
+        assert!(text.contains("toolDefinition: true"));
+        assert!(text.contains("researcher@{"));
+        assert!(text.contains("agentDefinition: true"));
+        assert!(text.contains("shape: hex"));
     }
 
     #[test]
@@ -800,7 +826,9 @@ mod tests {
         let src = "schema Report { title :: String body :: String }";
         let program = parse_program(src);
         let text = pact_to_agentflow(&program);
-        assert!(text.contains("Report{{\"Report\"}}"));
+        assert!(text.contains("type Report = Record {"));
+        assert!(text.contains("title: String"));
+        assert!(text.contains("body: String"));
     }
 
     #[test]
@@ -814,8 +842,7 @@ mod tests {
         "#;
         let program = parse_program(src);
         let text = pact_to_agentflow(&program);
-        assert!(text.contains("website_copy[[\"website_copy\"]]"));
-        assert!(text.contains("HERO_TAGLINE"));
+        assert!(text.contains("%% template website_copy: HERO_TAGLINE"));
     }
 
     #[test]
@@ -830,8 +857,7 @@ mod tests {
         "#;
         let program = parse_program(src);
         let text = pact_to_agentflow(&program);
-        assert!(text.contains("scandinavian_design[/\"scandinavian_design\"/]"));
-        assert!(text.contains("text"));
+        assert!(text.contains("%% directive scandinavian_design"));
     }
 
     #[test]

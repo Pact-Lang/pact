@@ -269,6 +269,43 @@ pub struct AgentFlowGraph {
     pub bundles: Vec<AgentFlowBundle>,
     /// All edges (flow and reference) in the graph.
     pub edges: Vec<AgentFlowEdge>,
+    /// Flow definitions with their steps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flows: Vec<AgentFlowDef>,
+    /// Type alias declarations (union types).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub type_aliases: Vec<AgentFlowTypeAlias>,
+}
+
+/// A flow definition containing ordered steps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowDef {
+    /// Flow name.
+    pub name: String,
+    /// Ordered steps in the flow.
+    pub steps: Vec<AgentFlowStep>,
+}
+
+/// A single step in a flow: an agent dispatching a tool, producing an output.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowStep {
+    /// Output variable name.
+    pub output_var: String,
+    /// Agent name (without @).
+    pub agent: String,
+    /// Tool name (without #).
+    pub tool: String,
+    /// Argument variable names.
+    pub args: Vec<String>,
+}
+
+/// A type alias (union type) declaration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowTypeAlias {
+    /// Alias name.
+    pub name: String,
+    /// Variant names.
+    pub variants: Vec<String>,
 }
 
 impl AgentFlowGraph {
@@ -283,6 +320,8 @@ impl AgentFlowGraph {
             agents: Vec::new(),
             bundles: Vec::new(),
             edges: Vec::new(),
+            flows: Vec::new(),
+            type_aliases: Vec::new(),
         }
     }
 }

@@ -1,0 +1,22 @@
+agentflow LR
+    subgraph researcher["@researcher"]
+        search["Search"]@{
+            description: "Search the web"
+            requires: ["^net.read"]
+            params:
+                query: "String"
+            returns: "String"
+        }
+    end
+
+    subgraph writer["@writer"]
+        summarize["Summarize"]@{
+            description: "Summarize results"
+            requires: ["^llm.query"]
+            params:
+                content: "String"
+            returns: "String"
+        }
+    end
+
+    search --> summarize
