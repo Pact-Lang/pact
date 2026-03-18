@@ -826,9 +826,7 @@ mod tests {
                 .unwrap();
 
             // Send SSE headers and endpoint event
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\nevent: endpoint\ndata: /messages\n\n"
-            );
+            let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\nevent: endpoint\ndata: /messages\n\n";
             socket.write_all(response.as_bytes()).await.unwrap();
 
             // Keep the connection open for a bit

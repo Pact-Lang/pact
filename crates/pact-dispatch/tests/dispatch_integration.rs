@@ -471,7 +471,7 @@ fn convert_roundtrip_int() {
 
 #[test]
 fn convert_roundtrip_float() {
-    let val = Value::Float(3.14);
+    let val = Value::Float(2.72);
     let json = value_to_json(&val);
     let back = json_to_value(&json);
     assert_eq!(back, val);
