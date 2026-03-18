@@ -21,8 +21,11 @@
 //! let program = Parser::new(&tokens).parse().unwrap();
 //! ```
 
+/// Expression parsing (dispatch, pipelines, match, literals, etc.).
 pub mod expr;
+/// Statement and declaration parsing (agent, flow, schema, etc.).
 pub mod stmt;
+/// Type annotation parsing.
 pub mod types;
 
 use crate::ast::stmt::Program;
@@ -35,10 +38,14 @@ use thiserror::Error;
 /// Error produced during parsing.
 #[derive(Debug, Error, Diagnostic, Clone)]
 pub enum ParseError {
+    /// A token was found where a different token was expected.
     #[error("expected {expected}, found {found}")]
     UnexpectedToken {
+        /// Description of the expected token kind.
         expected: String,
+        /// Description of the token that was actually found.
         found: String,
+        /// Location of the unexpected token.
         #[label("here")]
         span: miette::SourceSpan,
     },
@@ -566,6 +573,85 @@ mod tests {
                 _ => panic!("expected assignment"),
             },
             _ => panic!("expected Flow"),
+        }
+    }
+
+    #[test]
+    fn parse_connect_block() {
+        let src = r#"connect {
+            slack "stdio slack-mcp-server"
+            github "stdio github-mcp-server --token abc"
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Connect(c) => {
+                assert_eq!(c.servers.len(), 2);
+                assert_eq!(c.servers[0].name, "slack");
+                assert_eq!(c.servers[0].transport, "stdio slack-mcp-server");
+                assert_eq!(c.servers[1].name, "github");
+                assert_eq!(
+                    c.servers[1].transport,
+                    "stdio github-mcp-server --token abc"
+                );
+            }
+            _ => panic!("expected Connect"),
+        }
+    }
+
+    #[test]
+    fn parse_connect_with_sse() {
+        let src = r#"connect {
+            sentry "sse https://sentry.internal/mcp"
+        }"#;
+        let prog = parse(src);
+        match &prog.decls[0].kind {
+            DeclKind::Connect(c) => {
+                assert_eq!(c.servers.len(), 1);
+                assert_eq!(c.servers[0].name, "sentry");
+                assert_eq!(c.servers[0].transport, "sse https://sentry.internal/mcp");
+            }
+            _ => panic!("expected Connect"),
+        }
+    }
+
+    #[test]
+    fn parse_tool_mcp_shorthand() {
+        let src = "tool #create_issue = mcp github/create_issue";
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Tool(t) => {
+                assert_eq!(t.name, "create_issue");
+                assert_eq!(
+                    t.mcp_import,
+                    Some(("github".to_string(), "create_issue".to_string()))
+                );
+                assert_eq!(t.handler, Some("mcp github/create_issue".to_string()));
+                assert!(t.params.is_empty());
+            }
+            _ => panic!("expected Tool"),
+        }
+    }
+
+    #[test]
+    fn parse_tool_mcp_handler() {
+        let src = r#"tool #post_alert {
+            description: <<Post alert.>>
+            requires: [^mcp.slack]
+            handler: "mcp slack/send_message"
+            params { channel :: String, text :: String }
+            returns :: String
+        }"#;
+        let prog = parse(src);
+        match &prog.decls[0].kind {
+            DeclKind::Tool(t) => {
+                assert_eq!(t.name, "post_alert");
+                assert_eq!(t.handler, Some("mcp slack/send_message".to_string()));
+                assert!(t.mcp_import.is_none());
+                assert_eq!(t.params.len(), 2);
+            }
+            _ => panic!("expected Tool"),
         }
     }
 

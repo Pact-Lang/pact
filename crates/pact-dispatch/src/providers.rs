@@ -9,6 +9,7 @@
 
 use crate::DispatchError;
 use std::collections::HashMap;
+use tracing::debug;
 
 /// A registered provider with its execution logic.
 #[derive(Debug, Clone)]
@@ -195,9 +196,12 @@ async fn execute_search_duckduckgo(
         urlencoding::encode(query)
     );
 
-    println!("[PROVIDER] search.duckduckgo: {query}");
+    debug!(query = query.as_str(), "search.duckduckgo");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
     let response = client
         .get(&url)
         .send()
@@ -208,7 +212,7 @@ async fn execute_search_duckduckgo(
         DispatchError::ExecutionError(format!("failed to read DuckDuckGo response: {e}"))
     })?;
 
-    println!("[PROVIDER] search.duckduckgo => {} bytes", body.len());
+    debug!(bytes = body.len(), "search.duckduckgo response");
     Ok(body)
 }
 
@@ -233,9 +237,12 @@ async fn execute_search_google(params: &HashMap<String, String>) -> Result<Strin
         urlencoding::encode(query)
     );
 
-    println!("[PROVIDER] search.google: {query}");
+    debug!(query = query.as_str(), "search.google");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
     let response = client
         .get(&url)
         .send()
@@ -253,7 +260,7 @@ async fn execute_search_google(params: &HashMap<String, String>) -> Result<Strin
         )));
     }
 
-    println!("[PROVIDER] search.google => {} bytes", body.len());
+    debug!(bytes = body.len(), "search.google response");
     Ok(body)
 }
 
@@ -271,9 +278,12 @@ async fn execute_search_brave(params: &HashMap<String, String>) -> Result<String
         urlencoding::encode(query)
     );
 
-    println!("[PROVIDER] search.brave: {query}");
+    debug!(query = query.as_str(), "search.brave");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
     let response = client
         .get(&url)
         .header("X-Subscription-Token", &api_key)
@@ -293,7 +303,7 @@ async fn execute_search_brave(params: &HashMap<String, String>) -> Result<String
         )));
     }
 
-    println!("[PROVIDER] search.brave => {} bytes", body.len());
+    debug!(bytes = body.len(), "search.brave response");
     Ok(body)
 }
 
@@ -304,9 +314,12 @@ async fn execute_http_get(params: &HashMap<String, String>) -> Result<String, Di
         DispatchError::ExecutionError("http.get requires a 'url' parameter".into())
     })?;
 
-    println!("[PROVIDER] http.get: {url}");
+    debug!(url = url.as_str(), "http.get");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
     let response = client
         .get(url)
         .send()
@@ -325,7 +338,7 @@ async fn execute_http_get(params: &HashMap<String, String>) -> Result<String, Di
         )));
     }
 
-    println!("[PROVIDER] http.get => {status} ({} bytes)", body.len());
+    debug!(status = %status, bytes = body.len(), "http.get response");
     Ok(body)
 }
 
@@ -338,9 +351,12 @@ async fn execute_http_post(params: &HashMap<String, String>) -> Result<String, D
         .cloned()
         .unwrap_or_else(|| "{}".to_string());
 
-    println!("[PROVIDER] http.post: {url}");
+    debug!(url = url.as_str(), "http.post");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -361,7 +377,7 @@ async fn execute_http_post(params: &HashMap<String, String>) -> Result<String, D
         )));
     }
 
-    println!("[PROVIDER] http.post => {status} ({} bytes)", body.len());
+    debug!(status = %status, bytes = body.len(), "http.post response");
     Ok(body)
 }
 
@@ -372,7 +388,7 @@ fn execute_fs_read(params: &HashMap<String, String>) -> Result<String, DispatchE
         DispatchError::ExecutionError("fs.read requires a 'path' parameter".into())
     })?;
 
-    println!("[PROVIDER] fs.read: {path}");
+    debug!(path = path.as_str(), "fs.read");
 
     std::fs::read_to_string(path)
         .map_err(|e| DispatchError::ExecutionError(format!("failed to read file '{path}': {e}")))
@@ -386,7 +402,7 @@ fn execute_fs_write(params: &HashMap<String, String>) -> Result<String, Dispatch
         DispatchError::ExecutionError("fs.write requires a 'content' parameter".into())
     })?;
 
-    println!("[PROVIDER] fs.write: {path}");
+    debug!(path = path.as_str(), "fs.write");
 
     std::fs::write(path, content).map_err(|e| {
         DispatchError::ExecutionError(format!("failed to write file '{path}': {e}"))
@@ -400,7 +416,7 @@ fn execute_fs_glob(params: &HashMap<String, String>) -> Result<String, DispatchE
         DispatchError::ExecutionError("fs.glob requires a 'pattern' parameter".into())
     })?;
 
-    println!("[PROVIDER] fs.glob: {pattern}");
+    debug!(pattern = pattern.as_str(), "fs.glob");
 
     let paths: Vec<String> = glob::glob(pattern)
         .map_err(|e| DispatchError::ExecutionError(format!("invalid glob pattern: {e}")))?

@@ -9,6 +9,7 @@
 use tower_lsp::{LspService, Server};
 
 mod backend;
+mod symbol_index;
 
 #[tokio::main]
 async fn main() {

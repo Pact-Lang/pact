@@ -17,12 +17,16 @@
 //! let mut interp = Interpreter::with_dispatcher(Box::new(dispatcher));
 //! ```
 
+use std::sync::Arc;
+
 use pact_core::ast::stmt::{AgentDecl, Program};
 use pact_core::interpreter::value::Value;
 use pact_core::interpreter::Dispatcher;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
+use crate::rate_limit::{RateLimitConfig, RateLimiter};
 use crate::DispatchError;
 
 /// Default base URL for the Ollama API.
@@ -40,6 +44,7 @@ pub struct OllamaDispatcher {
     model: String,
     client: Client,
     runtime: tokio::runtime::Runtime,
+    rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 /// Request body for the Ollama `/api/generate` endpoint.
@@ -77,8 +82,13 @@ impl OllamaDispatcher {
     }
 
     /// Create a dispatcher with an explicit base URL and model.
+    ///
+    /// Configures a 120-second request timeout (local models can be slow).
     pub fn new(base_url: String, model: String) -> Result<Self, DispatchError> {
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|e| DispatchError::HttpError(e.to_string()))?;
         let runtime =
             tokio::runtime::Runtime::new().map_err(|e| DispatchError::HttpError(e.to_string()))?;
         Ok(Self {
@@ -86,7 +96,14 @@ impl OllamaDispatcher {
             model,
             client,
             runtime,
+            rate_limiter: None,
         })
+    }
+
+    /// Configure rate limiting for this dispatcher.
+    pub fn with_rate_limits(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limiter = Some(Arc::new(RateLimiter::new(config)));
+        self
     }
 
     /// Build the prompt string from dispatch arguments.
@@ -199,7 +216,16 @@ impl Dispatcher for OllamaDispatcher {
         _agent_decl: &AgentDecl,
         _program: &Program,
     ) -> Result<Value, String> {
-        println!("[OLLAMA] @{agent_name} -> #{tool_name}");
+        info!(agent = agent_name, tool = tool_name, "dispatching");
+
+        if let Some(limiter) = &self.rate_limiter {
+            limiter
+                .check_agent_limit(agent_name)
+                .map_err(|e| e.to_string())?;
+            limiter
+                .check_global_limit()
+                .map_err(|e| e.to_string())?;
+        }
 
         let prompt = Self::build_prompt(agent_name, tool_name, args);
 
@@ -207,6 +233,10 @@ impl Dispatcher for OllamaDispatcher {
             .runtime
             .block_on(self.send_request(&prompt))
             .map_err(|e| e.to_string())?;
+
+        if let Some(limiter) = &self.rate_limiter {
+            limiter.record_agent_call(agent_name);
+        }
 
         Ok(Value::ToolResult(result))
     }

@@ -12,7 +12,9 @@ use crate::span::Span;
 /// A single lexical token with its kind and source location.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Token {
+    /// The classification of this token.
     pub kind: TokenKind,
+    /// The source location of this token.
     pub span: Span,
 }
 
@@ -46,56 +48,101 @@ pub enum TokenKind {
     FatArrow,
 
     // ── Delimiters ─────────────────────────────────────────
+    /// `(` — opening parenthesis
     LParen,
+    /// `)` — closing parenthesis
     RParen,
+    /// `{` — opening brace
     LBrace,
+    /// `}` — closing brace
     RBrace,
+    /// `[` — opening bracket
     LBracket,
+    /// `]` — closing bracket
     RBracket,
 
     // ── Punctuation ────────────────────────────────────────
+    /// `,` — comma separator
     Comma,
+    /// `:` — colon separator
     Colon,
+    /// `.` — dot accessor
     Dot,
+    /// `=` — assignment operator
     Eq,
+    /// `==` — equality comparison
     EqEq,
+    /// `!=` — inequality comparison
     BangEq,
+    /// `<` — less-than comparison
     Lt,
+    /// `>` — greater-than comparison
     Gt,
+    /// `<=` — less-than-or-equal comparison
     LtEq,
+    /// `>=` — greater-than-or-equal comparison
     GtEq,
+    /// `+` — addition operator
     Plus,
+    /// `-` — subtraction operator
     Minus,
+    /// `*` — multiplication operator
     Star,
+    /// `/` — division operator
     Slash,
     /// `|` — union type separator
     Bar,
 
     // ── Keywords ───────────────────────────────────────────
+    /// `agent` — agent declaration keyword
     Agent,
+    /// `agent_bundle` — agent bundle declaration keyword
     AgentBundle,
+    /// `flow` — flow declaration keyword
     Flow,
+    /// `schema` — schema declaration keyword
     Schema,
+    /// `type` — type alias keyword
     Type,
+    /// `permit_tree` — permission tree declaration keyword
     PermitTree,
+    /// `test` — test block keyword
     Test,
+    /// `permits` — agent permission list keyword
     Permits,
+    /// `tools` — agent tool list keyword
     Tools,
+    /// `model` — agent model specification keyword
     Model,
+    /// `prompt` — agent prompt keyword
     Prompt,
+    /// `memory` — agent memory specification keyword
     Memory,
+    /// `agents` — agent list keyword (in bundles/flows)
     Agents,
+    /// `fallbacks` — fallback list keyword
     Fallbacks,
+    /// `match` — pattern match keyword
     Match,
+    /// `return` — return value keyword
     Return,
+    /// `fail` — failure keyword
     Fail,
+    /// `record` — memory record keyword
     Record,
+    /// `assert` — assertion keyword (in tests)
     Assert,
+    /// `true` — boolean true literal
     True,
+    /// `false` — boolean false literal
     False,
+    /// `parallel` — parallel execution keyword
     Parallel,
+    /// `on` — event handler keyword
     On,
+    /// `if` — conditional keyword
     If,
+    /// `else` — else branch keyword
     Else,
     /// `tool` — tool declaration keyword
     Tool,
@@ -139,6 +186,8 @@ pub enum TokenKind {
     Validate,
     /// `cache` — tool cache duration keyword
     Cache,
+    /// `connect` — MCP server connection block keyword
+    Connect,
 
     // ── Literals ───────────────────────────────────────────
     /// Integer literal, e.g. `42`
@@ -242,6 +291,7 @@ impl TokenKind {
             Self::Run => "'run'",
             Self::Validate => "'validate'",
             Self::Cache => "'cache'",
+            Self::Connect => "'connect'",
             Self::IntLit(_) => "integer",
             Self::FloatLit(_) => "float",
             Self::StringLit(_) => "string",

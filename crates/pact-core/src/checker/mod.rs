@@ -7,7 +7,7 @@
 //! The checker performs two passes over the AST:
 //!
 //! 1. **Name collection** — registers all top-level declarations into a
-//!    [`SymbolTable`](scope::SymbolTable), detecting duplicates.
+//!    [`SymbolTable`], detecting duplicates.
 //! 2. **Validation** — verifies type references, agent-tool-permission
 //!    consistency, and other semantic rules.
 //!
@@ -17,7 +17,7 @@
 //! - **Declarative** — if `tool #name { ... }` declarations exist, their
 //!   `requires` lists are used.
 //! - **Fallback** — if a tool is referenced but not declared, the hardcoded
-//!   [`tool_permission_registry`](permissions::tool_permission_registry) is consulted.
+//!   [`tool_permission_registry`] is consulted.
 //!
 //! # Usage
 //!
@@ -54,82 +54,139 @@ use thiserror::Error;
 /// A diagnostic error produced during semantic analysis.
 #[derive(Debug, Error, Diagnostic, Clone)]
 pub enum CheckError {
+    /// A symbol was defined more than once at the top level.
     #[error("duplicate definition of '{name}'")]
     DuplicateDefinition {
+        /// The duplicated symbol name.
         name: String,
+        /// Location of the redefinition.
         #[label("redefined here")]
         span: miette::SourceSpan,
     },
 
+    /// A type reference could not be resolved to any builtin or user-defined type.
     #[error("unknown type '{name}'")]
     UnknownType {
+        /// The unresolved type name.
         name: String,
+        /// Location where the type was referenced.
         #[label("used here")]
         span: miette::SourceSpan,
     },
 
+    /// An agent uses a tool without holding a required permission.
     #[error("agent '@{agent}' uses tool '#{tool}' which requires permission '{permission}', but the agent does not have it")]
     #[diagnostic(help("add '^{permission}' to the agent's permits list"))]
     MissingPermission {
+        /// Name of the agent lacking the permission.
         agent: String,
+        /// Name of the tool that requires the permission.
         tool: String,
+        /// The missing permission path.
         permission: String,
+        /// Location of the tool reference in the agent declaration.
         #[label("tool used here")]
         span: miette::SourceSpan,
     },
 
+    /// A reference to an agent that was never declared.
     #[error("unknown agent '@{name}'")]
     UnknownAgent {
+        /// The unresolved agent name.
         name: String,
+        /// Location of the reference.
         #[label("referenced here")]
         span: miette::SourceSpan,
     },
 
+    /// A reference to a flow that was never declared.
     #[error("unknown flow '{name}'")]
     UnknownFlow {
+        /// The unresolved flow name.
         name: String,
+        /// Location of the reference.
         #[label("referenced here")]
         span: miette::SourceSpan,
     },
 
+    /// A variable was reassigned with a value of a different inferred type.
     #[error("type inference warning: variable '{variable}' was inferred as {expected} but is being assigned {found}")]
     TypeInferenceWarning {
+        /// The variable being reassigned.
         variable: String,
+        /// The previously inferred type.
         expected: String,
+        /// The type of the new value.
         found: String,
     },
 
+    /// A tool's `source` block references an argument not declared in `params`.
     #[error("tool '#{tool}' source arg '{arg}' does not match any declared parameter")]
     #[diagnostic(help(
         "source args should reference parameters declared in the tool's params block"
     ))]
     SourceArgNotAParam {
+        /// Name of the tool containing the invalid source arg.
         tool: String,
+        /// The source argument that does not match any parameter.
         arg: String,
+        /// Location of the tool declaration.
         #[label("tool declared here")]
         span: miette::SourceSpan,
     },
 
+    /// A reference to a template that was never declared.
     #[error("unknown template '%{name}'")]
     #[diagnostic(help("define a template with `template %{name} {{ ... }}`"))]
     UnknownTemplate {
+        /// The unresolved template name.
         name: String,
+        /// Location of the reference.
         #[label("referenced here")]
         span: miette::SourceSpan,
     },
 
+    /// A reference to a directive that was never declared.
     #[error("unknown directive '%{name}'")]
     #[diagnostic(help("define a directive with `directive %{name} {{ ... }}`"))]
     UnknownDirective {
+        /// The unresolved directive name.
         name: String,
+        /// Location of the reference.
         #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+
+    /// A tool's MCP handler references an undeclared MCP server.
+    #[error("unknown MCP server '{name}'")]
+    #[diagnostic(help("declare the server in a `connect {{ {name} \"stdio ...\" }}` block"))]
+    UnknownMcpServer {
+        /// The unresolved MCP server name.
+        name: String,
+        /// Location of the reference.
+        #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+
+    /// An MCP connect entry has an invalid transport prefix.
+    #[error("invalid MCP transport '{transport}' for server '{name}'")]
+    #[diagnostic(help("transport must start with 'stdio ' or 'sse '"))]
+    InvalidMcpTransport {
+        /// The server name with the invalid transport.
+        name: String,
+        /// The invalid transport string.
+        transport: String,
+        /// Location of the entry.
+        #[label("declared here")]
         span: miette::SourceSpan,
     },
 }
 
 /// The semantic checker for PACT programs.
 pub struct Checker {
+    /// Collected top-level declarations.
     symbols: SymbolTable,
+    /// Accumulated semantic errors.
     errors: Vec<CheckError>,
     /// Whether the program contains any `tool` declarations.
     /// When true, we use declarative tool info; when false, we fall back
@@ -357,6 +414,29 @@ impl Checker {
                         });
                     }
                 }
+                DeclKind::Connect(c) => {
+                    for entry in &c.servers {
+                        // Validate transport prefix
+                        if !entry.transport.starts_with("stdio ")
+                            && !entry.transport.starts_with("sse ")
+                        {
+                            self.errors.push(CheckError::InvalidMcpTransport {
+                                name: entry.name.clone(),
+                                transport: entry.transport.clone(),
+                                span: (entry.span.start..entry.span.end).into(),
+                            });
+                        }
+                        self.symbols.define(
+                            format!("__mcp__{}", entry.name),
+                            SymbolKind::McpServer {
+                                name: entry.name.clone(),
+                            },
+                        );
+                        // Auto-define mcp.{name} permission
+                        self.symbols
+                            .define_permission(format!("mcp.{}", entry.name));
+                    }
+                }
                 DeclKind::Test(_) => {
                     // Tests don't define symbols
                 }
@@ -485,6 +565,21 @@ impl Checker {
                                 name: format!("invalid cache duration '{}' (expected format like '24h', '30m', '7d')", cache),
                                 span: (decl.span.start..decl.span.end).into(),
                             });
+                        }
+                    }
+
+                    // Validate MCP handler references
+                    if let Some(handler_str) = &t.handler {
+                        if let Some(rest) = handler_str.strip_prefix("mcp ") {
+                            if let Some((server, _tool)) = rest.split_once('/') {
+                                let key = format!("__mcp__{}", server);
+                                if self.symbols.lookup(&key).is_none() {
+                                    self.errors.push(CheckError::UnknownMcpServer {
+                                        name: server.to_string(),
+                                        span: (decl.span.start..decl.span.end).into(),
+                                    });
+                                }
+                            }
                         }
                     }
 
@@ -956,6 +1051,79 @@ mod tests {
             "expected TypeInferenceWarning, got: {:?}",
             errors[0]
         );
+    }
+
+    // ── MCP / connect tests ────────────────────────────────────
+
+    #[test]
+    fn connect_block_valid() {
+        let src = r#"
+            connect {
+                slack "stdio slack-mcp-server"
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn connect_block_invalid_transport() {
+        let src = r#"
+            connect {
+                bad "ftp://example.com"
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::InvalidMcpTransport { .. }));
+    }
+
+    #[test]
+    fn mcp_handler_valid() {
+        let src = r#"
+            connect {
+                slack "stdio slack-mcp-server"
+            }
+            tool #post {
+                description: <<Post.>>
+                requires: [^mcp.slack]
+                handler: "mcp slack/send_message"
+                params { text :: String }
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn mcp_handler_unknown_server() {
+        let src = r#"
+            tool #post {
+                description: <<Post.>>
+                requires: []
+                handler: "mcp slack/send_message"
+                params { text :: String }
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], CheckError::UnknownMcpServer { .. }));
+    }
+
+    #[test]
+    fn mcp_tool_shorthand_with_connect() {
+        let src = r#"
+            connect {
+                github "stdio github-mcp-server"
+            }
+            tool #create_issue = mcp github/create_issue
+            agent @bot {
+                permits: [^mcp.github]
+                tools: [#create_issue]
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
     }
 
     #[test]

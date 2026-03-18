@@ -47,6 +47,7 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
             DeclKind::Template(t) => templates.push(t),
             DeclKind::Directive(d) => directives.push(d),
             DeclKind::Import(_) => {} // imports resolved by loader
+            DeclKind::Connect(_) => {} // MCP connections are structural
         }
     }
 

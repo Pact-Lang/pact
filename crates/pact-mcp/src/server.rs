@@ -105,9 +105,20 @@ fn handle_request(req: &JsonRpcRequest) -> JsonRpcResponse {
 
 fn write_response(stdout: &io::Stdout, resp: &JsonRpcResponse) {
     let mut out = stdout.lock();
-    let json = serde_json::to_string(resp).unwrap();
-    writeln!(out, "{json}").unwrap();
-    out.flush().unwrap();
+    let json = match serde_json::to_string(resp) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("[pact-mcp] failed to serialize response: {e}");
+            return;
+        }
+    };
+    if let Err(e) = writeln!(out, "{json}") {
+        eprintln!("[pact-mcp] failed to write response: {e}");
+        return;
+    }
+    if let Err(e) = out.flush() {
+        eprintln!("[pact-mcp] failed to flush stdout: {e}");
+    }
 }
 
 #[cfg(test)]

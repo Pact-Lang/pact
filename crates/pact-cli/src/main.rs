@@ -102,6 +102,18 @@ enum Command {
         /// Enable streaming output (prints text token-by-token).
         #[arg(long)]
         stream: bool,
+
+        /// Maximum API calls per agent before rate limiting.
+        #[arg(long, default_value = "100")]
+        max_calls: u64,
+
+        /// Maximum tokens per flow before rate limiting.
+        #[arg(long, default_value = "100000")]
+        max_tokens: u64,
+
+        /// Maximum total API calls across all agents.
+        #[arg(long, default_value = "1000")]
+        max_global_calls: u64,
     },
 
     /// Run all test declarations in a .pact file.
@@ -166,9 +178,38 @@ enum Command {
         #[arg(long, short)]
         output: Option<String>,
     },
+
+    /// MCP server operations.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+/// MCP subcommands.
+#[derive(Subcommand)]
+enum McpAction {
+    /// List tools available on an MCP server declared in a .pact file.
+    ListTools {
+        /// Name of the MCP server (as declared in the connect block).
+        server: String,
+
+        /// Path to the .pact file containing the connect block.
+        #[arg(long)]
+        file: String,
+    },
 }
 
 fn main() -> Result<()> {
+    // Initialize structured logging (respects RUST_LOG, defaults to info for pact_dispatch)
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("pact_dispatch=info")),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
     // Install miette's fancy error handler
     miette::set_hook(Box::new(|_| {
         Box::new(
@@ -197,7 +238,19 @@ fn main() -> Result<()> {
             args,
             dispatch,
             stream,
-        } => cmd_run(&file, &flow, args, &dispatch, stream),
+            max_calls,
+            max_tokens,
+            max_global_calls,
+        } => cmd_run(
+            &file,
+            &flow,
+            args,
+            &dispatch,
+            stream,
+            max_calls,
+            max_tokens,
+            max_global_calls,
+        ),
         Command::Test { file } => cmd_test(&file),
         Command::FromMermaid { file, output } => cmd_from_mermaid(&file, output.as_deref()),
         Command::ToMermaid { file, output } => cmd_to_mermaid(&file, output.as_deref()),
@@ -205,6 +258,9 @@ fn main() -> Result<()> {
         Command::List { what, file } => cmd_list(&what, file.as_deref()),
         Command::Fmt { file, write } => cmd_fmt(&file, write),
         Command::Doc { file, output } => cmd_doc(&file, output.as_deref()),
+        Command::Mcp { action } => match action {
+            McpAction::ListTools { server, file } => cmd_mcp_list_tools(&server, &file),
+        },
     }
 }
 
@@ -564,12 +620,16 @@ fn list_output_files(dir: &str, depth: usize) {
 }
 
 /// `pact run <file> --flow <name> [--dispatch mock|claude]` — execute a flow.
+#[allow(clippy::too_many_arguments)]
 fn cmd_run(
     path: &str,
     flow_name: &str,
     args: Option<Vec<String>>,
     dispatch: &str,
     stream: bool,
+    max_calls: u64,
+    max_tokens: u64,
+    max_global_calls: u64,
 ) -> Result<()> {
     let (program, _sm) = load_and_check(path)?;
 
@@ -590,21 +650,30 @@ fn cmd_run(
         return cmd_run_stream(path, flow_name, &arg_values, &program);
     }
 
+    let rate_config = pact_dispatch::RateLimitConfig {
+        max_calls_per_agent: max_calls,
+        max_tokens_per_flow: max_tokens,
+        max_global_calls,
+    };
+
     let mut interpreter = match dispatch {
         "mock" => Interpreter::with_dispatcher(Box::new(MockDispatcher)),
         "claude" => {
-            let dispatcher =
-                pact_dispatch::ClaudeDispatcher::from_env().map_err(|e| miette::miette!("{e}"))?;
+            let dispatcher = pact_dispatch::ClaudeDispatcher::from_env()
+                .map_err(|e| miette::miette!("{e}"))?
+                .with_rate_limits(rate_config);
             Interpreter::with_dispatcher(Box::new(dispatcher))
         }
         "openai" => {
-            let dispatcher =
-                pact_dispatch::OpenAIDispatcher::from_env().map_err(|e| miette::miette!("{e}"))?;
+            let dispatcher = pact_dispatch::OpenAIDispatcher::from_env()
+                .map_err(|e| miette::miette!("{e}"))?
+                .with_rate_limits(rate_config);
             Interpreter::with_dispatcher(Box::new(dispatcher))
         }
         "ollama" => {
-            let dispatcher =
-                pact_dispatch::OllamaDispatcher::from_env().map_err(|e| miette::miette!("{e}"))?;
+            let dispatcher = pact_dispatch::OllamaDispatcher::from_env()
+                .map_err(|e| miette::miette!("{e}"))?
+                .with_rate_limits(rate_config);
             Interpreter::with_dispatcher(Box::new(dispatcher))
         }
         other => {
@@ -848,6 +917,7 @@ fn cmd_list_declarations(path: &str) -> Result<()> {
             DeclKind::Template(_) => {}   // Listed separately if needed
             DeclKind::Directive(_) => {}  // Listed separately if needed
             DeclKind::Import(_) => {}     // Resolved by loader
+            DeclKind::Connect(_) => {}   // MCP connections
         }
     }
 
@@ -975,7 +1045,7 @@ fn cmd_from_mermaid(path: &str, output: Option<&str>) -> Result<()> {
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to read '{path}'"))?;
 
-    let pact_source = pact_mermaid::mermaid_to_pact(&source).map_err(|e| miette::miette!("{e}"))?;
+    let pact_source = pact_mermaid::diagram_to_pact(&source).map_err(|e| miette::miette!("{e}"))?;
 
     if let Some(out_path) = output {
         fs::write(out_path, &pact_source)
@@ -993,7 +1063,7 @@ fn cmd_from_mermaid(path: &str, output: Option<&str>) -> Result<()> {
 fn cmd_to_mermaid(path: &str, output: Option<&str>) -> Result<()> {
     let (program, _sm) = load_and_check(path)?;
 
-    let mermaid_source = pact_mermaid::pact_to_mermaid(&program);
+    let mermaid_source = pact_mermaid::pact_to_agentflow_text(&program);
 
     if let Some(out_path) = output {
         fs::write(out_path, &mermaid_source)
@@ -1061,6 +1131,65 @@ fn cmd_doc(path: &str, output: Option<&str>) -> Result<()> {
         println!("Generated documentation: '{}'", out_path);
     } else {
         print!("{markdown}");
+    }
+
+    Ok(())
+}
+
+/// `pact mcp list-tools <server> --file <file>` — list tools on an MCP server.
+fn cmd_mcp_list_tools(server: &str, path: &str) -> Result<()> {
+    let (program, _sm) = load_and_check(path)?;
+
+    // Find the server in the connect block
+    let mut found_transport = None;
+    for decl in &program.decls {
+        if let DeclKind::Connect(c) = &decl.kind {
+            for entry in &c.servers {
+                if entry.name == server {
+                    found_transport = Some(entry.transport.clone());
+                }
+            }
+        }
+    }
+
+    let transport = found_transport.ok_or_else(|| {
+        miette::miette!(
+            "MCP server '{}' not found in connect block of '{}'",
+            server,
+            path
+        )
+    })?;
+
+    let command = if let Some(cmd) = transport.strip_prefix("stdio ") {
+        cmd
+    } else {
+        miette::bail!("only stdio transport is currently supported (got: {})", transport);
+    };
+
+    // Connect and list tools
+    let rt = tokio::runtime::Runtime::new()
+        .into_diagnostic()
+        .wrap_err("failed to create tokio runtime")?;
+
+    let tools = rt.block_on(async {
+        let mut conn = pact_dispatch::mcp_client::McpConnection::connect_stdio(server, command)
+            .await
+            .map_err(|e| miette::miette!("{}", e))?;
+        let tools = conn.list_tools().await.map_err(|e| miette::miette!("{}", e))?;
+        Ok::<Vec<pact_dispatch::mcp_client::McpToolInfo>, miette::Report>(tools.to_vec())
+    })?;
+
+    if tools.is_empty() {
+        println!("No tools found on MCP server '{}'.", server);
+    } else {
+        println!("Tools on MCP server '{}':", server);
+        println!("{:<30} DESCRIPTION", "NAME");
+        println!("{}", "-".repeat(70));
+        for tool in &tools {
+            let desc = tool.description.as_deref().unwrap_or("-");
+            println!("{:<30} {}", tool.name, desc);
+        }
+        println!("\n{} tool(s) total.", tools.len());
     }
 
     Ok(())
@@ -1407,6 +1536,7 @@ fn playground_list_decls(decls: &[Decl]) {
             DeclKind::Template(_) => {}  // Templates are structural
             DeclKind::Directive(_) => {} // Directives are structural
             DeclKind::Import(_) => {}    // Resolved by loader
+            DeclKind::Connect(_) => {}   // MCP connections are structural
         }
     }
 
@@ -1554,6 +1684,10 @@ fn playground_eval(
                 DeclKind::Directive(d) => println!("Defined directive %{}", d.name),
                 DeclKind::Test(t) => println!("Defined test \"{}\"", t.description),
                 DeclKind::Import(i) => println!("Import \"{}\"", i.path),
+                DeclKind::Connect(c) => {
+                    let names: Vec<_> = c.servers.iter().map(|s| s.name.as_str()).collect();
+                    println!("Defined connect block ({})", names.join(", "));
+                }
             }
         }
 

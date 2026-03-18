@@ -113,8 +113,16 @@ impl<'t> Parser<'t> {
                     kind: DeclKind::Import(decl),
                 })
             }
+            TokenKind::Connect => {
+                self.advance();
+                let decl = self.parse_connect_decl()?;
+                Ok(Decl {
+                    span: span.merge(self.previous_span()),
+                    kind: DeclKind::Connect(decl),
+                })
+            }
             _ => Err(ParseError::UnexpectedToken {
-                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import)"
+                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect)"
                     .to_string(),
                 found: self.peek_kind().describe().to_string(),
                 span: (span.start..span.end).into(),
@@ -305,10 +313,49 @@ impl<'t> Parser<'t> {
         Ok(params)
     }
 
-    /// Parse `tool #name { description: <<...>> requires: [...] params { ... } returns :: Type }`.
+    /// Parse `tool #name { ... }` or `tool #name = mcp server/tool`.
     fn parse_tool_decl(&mut self) -> Result<ToolDecl, ParseError> {
         self.expect(&TokenKind::Hash)?;
         let name = self.expect_ident("tool name")?;
+
+        // Check for shorthand: tool #name = mcp server/tool
+        if self.check(&TokenKind::Eq) {
+            self.advance();
+            let kw = self.expect_ident("'mcp' keyword")?;
+            if kw != "mcp" {
+                let span = self.previous_span();
+                return Err(ParseError::UnexpectedToken {
+                    expected: "'mcp' keyword after '='".to_string(),
+                    found: kw,
+                    span: (span.start..span.end).into(),
+                });
+            }
+            let server = self.expect_ident("server name")?;
+            self.expect(&TokenKind::Slash)?;
+            let tool = self.expect_ident("tool name")?;
+            return Ok(ToolDecl {
+                name,
+                description: crate::ast::expr::Expr {
+                    kind: crate::ast::expr::ExprKind::PromptLit(format!(
+                        "MCP tool {}/{} (schema resolved at runtime)",
+                        server, tool
+                    )),
+                    span: self.previous_span(),
+                },
+                requires: vec![],
+                handler: Some(format!("mcp {}/{}", server, tool)),
+                source: None,
+                output: None,
+                directives: vec![],
+                params: vec![],
+                return_type: None,
+                retry: None,
+                validate: None,
+                cache: None,
+                mcp_import: Some((server, tool)),
+            });
+        }
+
         self.expect(&TokenKind::LBrace)?;
 
         let mut description = None;
@@ -493,6 +540,7 @@ impl<'t> Parser<'t> {
             retry,
             validate,
             cache,
+            mcp_import: None,
         })
     }
 
@@ -693,6 +741,40 @@ impl<'t> Parser<'t> {
                 })
             }
         }
+    }
+
+    /// Parse `connect { name "transport", ... }`.
+    fn parse_connect_decl(&mut self) -> Result<ConnectDecl, ParseError> {
+        self.expect(&TokenKind::LBrace)?;
+        let mut servers = Vec::new();
+
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let entry_span = self.current_span();
+            let name = self.expect_ident("server name")?;
+            let transport = match self.peek_kind().clone() {
+                TokenKind::StringLit(s) => {
+                    self.advance();
+                    s
+                }
+                _ => {
+                    let span = self.current_span();
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "transport string (e.g. \"stdio cmd\" or \"sse url\")".to_string(),
+                        found: self.peek_kind().describe().to_string(),
+                        span: (span.start..span.end).into(),
+                    });
+                }
+            };
+            let span = entry_span.merge(self.previous_span());
+            servers.push(ConnectEntry {
+                name,
+                transport,
+                span,
+            });
+        }
+
+        self.expect(&TokenKind::RBrace)?;
+        Ok(ConnectDecl { servers })
     }
 
     /// Parse `test "description" { body }`.

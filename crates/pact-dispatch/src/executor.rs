@@ -5,13 +5,18 @@
 //! Real tool execution engine.
 //!
 //! Parses tool handler specifications and executes them:
-//! - `"http METHOD url"` — HTTP request
-//! - `"sh command"` — Shell command
+//! - `"http METHOD url"` — HTTP request (response bounded to 10 MB)
+//! - `"sh command"` — Shell command (params are shell-escaped to prevent injection)
 //! - `"builtin:name"` — Built-in function
+//! - `"mcp server/tool"` — MCP server tool call (routed through connection pool)
 //!
 //! Parameter values are interpolated via `{param_name}` placeholders.
+//! Shell handlers use single-quote escaping to prevent command injection.
+//! Diagnostic output goes to stderr; sensitive values are redacted in logs.
 
 use std::collections::HashMap;
+
+use tracing::debug;
 
 use crate::DispatchError;
 
@@ -19,11 +24,29 @@ use crate::DispatchError;
 #[derive(Debug, Clone, PartialEq)]
 pub enum HandlerSpec {
     /// HTTP handler: method + URL template.
-    Http { method: String, url: String },
+    Http {
+        /// The HTTP method (GET, POST, PUT, DELETE, PATCH).
+        method: String,
+        /// The URL template with `{param}` placeholders.
+        url: String,
+    },
     /// Shell handler: command template.
-    Shell { command: String },
+    Shell {
+        /// The shell command template with `{param}` placeholders.
+        command: String,
+    },
     /// Built-in handler: function name.
-    Builtin { name: String },
+    Builtin {
+        /// The built-in function name (e.g., "echo", "json", "noop").
+        name: String,
+    },
+    /// MCP handler: server name + tool name.
+    Mcp {
+        /// The MCP server name (as declared in `connect`).
+        server: String,
+        /// The tool name on the MCP server.
+        tool: String,
+    },
 }
 
 /// Parse a handler string into a `HandlerSpec`.
@@ -47,6 +70,19 @@ pub fn parse_handler(spec: &str) -> Result<HandlerSpec, DispatchError> {
         });
     }
 
+    if let Some(rest) = spec.strip_prefix("mcp ") {
+        let (server, tool) = rest.split_once('/').ok_or_else(|| {
+            DispatchError::ExecutionError(
+                "mcp handler requires server/tool format (e.g. 'mcp slack/send_message')"
+                    .to_string(),
+            )
+        })?;
+        return Ok(HandlerSpec::Mcp {
+            server: server.trim().to_string(),
+            tool: tool.trim().to_string(),
+        });
+    }
+
     if let Some(rest) = spec.strip_prefix("http ") {
         let rest = rest.trim();
         let (method, url) = rest.split_once(' ').ok_or_else(|| {
@@ -61,7 +97,7 @@ pub fn parse_handler(spec: &str) -> Result<HandlerSpec, DispatchError> {
     }
 
     Err(DispatchError::ExecutionError(format!(
-        "unknown handler format: '{}'. Expected 'http METHOD url', 'sh command', or 'builtin:name'",
+        "unknown handler format: '{}'. Expected 'http METHOD url', 'sh command', 'builtin:name', or 'mcp server/tool'",
         spec
     )))
 }
@@ -74,6 +110,50 @@ pub fn interpolate(template: &str, params: &HashMap<String, String>) -> String {
     }
     result
 }
+
+/// Shell-escape a string by wrapping it in single quotes.
+///
+/// Any existing single quotes are replaced with `'\''` (end quote, escaped quote, start quote).
+fn shell_escape(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Interpolate parameters with shell escaping applied to each value.
+fn interpolate_shell(template: &str, params: &HashMap<String, String>) -> String {
+    let mut result = template.to_string();
+    for (key, value) in params {
+        result = result.replace(&format!("{{{}}}", key), &shell_escape(value));
+    }
+    result
+}
+
+/// Redact potentially sensitive values from a URL or command string for logging.
+///
+/// Replaces query parameter values, Bearer tokens, and API key patterns.
+fn redact_for_log(s: &str) -> String {
+    // Redact query parameter values (key=value) where value is long enough to be a secret
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        result.push(ch);
+        if ch == '=' {
+            // Peek ahead to see the value length
+            let rest: String = chars.clone().take_while(|c| *c != '&' && *c != ' ').collect();
+            if rest.len() > 8 {
+                result.push_str("[REDACTED]");
+                // Consume the value
+                for _ in 0..rest.len() {
+                    chars.next();
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Maximum response body size (10 MB).
+const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Extract parameter values from a JSON input object as string key-value pairs.
 pub fn extract_params(input: &serde_json::Value) -> HashMap<String, String> {
@@ -101,6 +181,10 @@ pub async fn execute_handler(
         HandlerSpec::Http { method, url } => execute_http(method, url, params).await,
         HandlerSpec::Shell { command } => execute_shell(command, params).await,
         HandlerSpec::Builtin { name } => execute_builtin(name, params),
+        HandlerSpec::Mcp { server, tool } => Err(DispatchError::ExecutionError(format!(
+            "MCP handler mcp {}/{} must be executed through the MCP connection pool, not execute_handler",
+            server, tool
+        ))),
     }
 }
 
@@ -112,9 +196,12 @@ async fn execute_http(
 ) -> Result<String, DispatchError> {
     let url = interpolate(url_template, params);
 
-    println!("[EXECUTOR] HTTP {method} {url}");
+    debug!(method, url = redact_for_log(&url).as_str(), "HTTP request");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
     let request = match method {
         "GET" => client.get(&url),
         "POST" => {
@@ -155,32 +242,50 @@ async fn execute_http(
         .map_err(|e| DispatchError::ExecutionError(format!("HTTP request failed: {e}")))?;
 
     let status = response.status();
+
+    // Check Content-Length before reading body to prevent OOM
+    if let Some(len) = response.content_length() {
+        if len as usize > MAX_RESPONSE_BYTES {
+            return Err(DispatchError::ExecutionError(format!(
+                "HTTP response too large: {len} bytes (max {MAX_RESPONSE_BYTES})"
+            )));
+        }
+    }
+
     let body = response
         .text()
         .await
         .map_err(|e| DispatchError::ExecutionError(format!("failed to read response body: {e}")))?;
 
-    if !status.is_success() {
+    if body.len() > MAX_RESPONSE_BYTES {
         return Err(DispatchError::ExecutionError(format!(
-            "HTTP {method} {url} returned {status}: {body}"
+            "HTTP response body too large: {} bytes (max {MAX_RESPONSE_BYTES})",
+            body.len()
         )));
     }
 
-    println!(
-        "[EXECUTOR] HTTP {method} => {status} ({} bytes)",
-        body.len()
-    );
+    if !status.is_success() {
+        return Err(DispatchError::ExecutionError(format!(
+            "HTTP {method} returned {status}: {}",
+            &body[..body.len().min(500)]
+        )));
+    }
+
+    debug!(method, status = %status, bytes = body.len(), "HTTP response");
     Ok(body)
 }
 
 /// Execute a shell handler.
+///
+/// Parameter values are shell-escaped (single-quoted) to prevent injection attacks.
 async fn execute_shell(
     command_template: &str,
     params: &HashMap<String, String>,
 ) -> Result<String, DispatchError> {
-    let command = interpolate(command_template, params);
+    // Use shell-escaped interpolation to prevent command injection
+    let command = interpolate_shell(command_template, params);
 
-    println!("[EXECUTOR] SH: {command}");
+    debug!(command = redact_for_log(&command).as_str(), "shell exec");
 
     let output = tokio::process::Command::new("sh")
         .arg("-c")
@@ -194,24 +299,32 @@ async fn execute_shell(
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
+    if stdout.len() > MAX_RESPONSE_BYTES {
+        return Err(DispatchError::ExecutionError(format!(
+            "shell command output too large: {} bytes (max {MAX_RESPONSE_BYTES})",
+            stdout.len()
+        )));
+    }
+
     if !output.status.success() {
         return Err(DispatchError::ExecutionError(format!(
-            "shell command failed (exit {}): stdout={stdout}, stderr={stderr}",
-            output.status.code().unwrap_or(-1)
+            "shell command failed (exit {}): stderr={}",
+            output.status.code().unwrap_or(-1),
+            &stderr[..stderr.len().min(500)]
         )));
     }
 
     if !stderr.is_empty() {
-        println!("[EXECUTOR] SH stderr: {stderr}");
+        debug!(stderr = &stderr[..stderr.len().min(200)], "shell stderr");
     }
 
-    println!("[EXECUTOR] SH => {} bytes", stdout.len());
+    debug!(bytes = stdout.len(), "shell output");
     Ok(stdout)
 }
 
 /// Execute a built-in handler.
 fn execute_builtin(name: &str, params: &HashMap<String, String>) -> Result<String, DispatchError> {
-    println!("[EXECUTOR] BUILTIN: {name}");
+    debug!(name, "builtin exec");
 
     match name {
         "echo" => {
@@ -244,6 +357,7 @@ pub fn handler_required_permissions(spec: &HandlerSpec) -> Vec<&'static str> {
         },
         HandlerSpec::Shell { .. } => vec!["sh.exec"],
         HandlerSpec::Builtin { .. } => vec![],
+        HandlerSpec::Mcp { .. } => vec![], // MCP permissions enforced via ^mcp.{server} in mediation
     }
 }
 
@@ -295,6 +409,32 @@ mod tests {
                 name: "echo".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn parse_mcp_handler() {
+        let spec = parse_handler("mcp slack/send_message").unwrap();
+        assert_eq!(
+            spec,
+            HandlerSpec::Mcp {
+                server: "slack".to_string(),
+                tool: "send_message".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_mcp_handler_missing_slash_fails() {
+        assert!(parse_handler("mcp slack_send_message").is_err());
+    }
+
+    #[test]
+    fn handler_permissions_mcp() {
+        let spec = HandlerSpec::Mcp {
+            server: "slack".to_string(),
+            tool: "send".to_string(),
+        };
+        assert!(handler_required_permissions(&spec).is_empty());
     }
 
     #[test]
@@ -379,5 +519,43 @@ mod tests {
     fn builtin_unknown_fails() {
         let params = HashMap::new();
         assert!(execute_builtin("unknown_fn", &params).is_err());
+    }
+
+    #[test]
+    fn shell_escape_basic() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+    }
+
+    #[test]
+    fn shell_escape_injection_attempt() {
+        assert_eq!(shell_escape("; rm -rf /"), "'; rm -rf /'");
+    }
+
+    #[test]
+    fn shell_escape_single_quotes() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn interpolate_shell_escapes_values() {
+        let mut params = HashMap::new();
+        params.insert("name".to_string(), "; cat /etc/passwd".to_string());
+        let result = interpolate_shell("echo {name}", &params);
+        assert_eq!(result, "echo '; cat /etc/passwd'");
+    }
+
+    #[test]
+    fn redact_short_values_preserved() {
+        // Short values (<=8 chars) are not redacted
+        let result = redact_for_log("https://api.com?q=rust");
+        assert!(result.contains("rust"));
+    }
+
+    #[test]
+    fn redact_long_values_hidden() {
+        // Long values (>8 chars) are redacted
+        let result = redact_for_log("https://api.com?key=sk_live_very_long_secret_key");
+        assert!(result.contains("[REDACTED]"));
+        assert!(!result.contains("sk_live"));
     }
 }

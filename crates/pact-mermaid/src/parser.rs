@@ -4,66 +4,111 @@
 
 use thiserror::Error;
 
+/// Errors produced during Mermaid/agentflow diagram parsing.
 #[derive(Debug, Error)]
 pub enum MermaidError {
-    #[error("expected 'flowchart' declaration at the beginning")]
+    /// No `flowchart` or `agentflow` declaration found.
+    #[error("expected 'flowchart' or 'agentflow' declaration at the beginning")]
     MissingFlowchart,
 
+    /// An unrecognized diagram direction was specified.
     #[error("unknown direction '{0}', expected LR, TD, TB, RL, or BT")]
     UnknownDirection(String),
 
+    /// A node definition could not be parsed.
     #[error("malformed node definition: '{0}'")]
     MalformedNode(String),
 
+    /// An edge definition could not be parsed.
     #[error("malformed edge definition: '{0}'")]
     MalformedEdge(String),
 
+    /// A subgraph block was never closed with `end`.
     #[error("unclosed subgraph '{0}'")]
     UnclosedSubgraph(String),
+
+    /// Metadata block (`@{...}`) could not be parsed.
+    #[error("malformed metadata: {0}")]
+    MalformedMetadata(String),
+
+    /// JSON parsing or serialization failed.
+    #[error("JSON error: {0}")]
+    JsonError(String),
+
+    /// The diagram type header is missing or invalid.
+    #[error("missing or invalid diagram type — expected 'agentflow'")]
+    MissingDiagramType,
 }
 
+/// Flowchart layout direction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Direction {
+    /// Left to right.
     LR,
+    /// Top down.
     TD,
+    /// Top to bottom (alias for TD).
     TB,
+    /// Right to left.
     RL,
+    /// Bottom to top.
     BT,
 }
 
+/// Shape of a Mermaid flowchart node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeShape {
+    /// Rectangle node (`[label]`).
     Rectangle,
+    /// Rounded rectangle node (`(label)`).
     Rounded,
+    /// Diamond/decision node (`{label}`).
     Diamond,
+    /// Circle node (`((label))`).
     Circle,
 }
 
+/// A node in a Mermaid flowchart graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MermaidNode {
+    /// Unique node identifier.
     pub id: String,
+    /// Display label for the node.
     pub label: String,
+    /// Visual shape of the node.
     pub shape: NodeShape,
 }
 
+/// A directed edge between two nodes in a Mermaid flowchart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MermaidEdge {
+    /// Source node identifier.
     pub from: String,
+    /// Target node identifier.
     pub to: String,
+    /// Optional edge label.
     pub label: Option<String>,
 }
 
+/// A named subgraph grouping nodes together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MermaidSubgraph {
+    /// Subgraph name/label.
     pub name: String,
+    /// IDs of nodes contained in this subgraph.
     pub node_ids: Vec<String>,
 }
 
+/// A parsed Mermaid flowchart graph.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MermaidGraph {
+    /// Layout direction of the flowchart.
     pub direction: Direction,
+    /// All nodes in the graph.
     pub nodes: Vec<MermaidNode>,
+    /// All directed edges in the graph.
     pub edges: Vec<MermaidEdge>,
+    /// Named subgraph groupings.
     pub subgraphs: Vec<MermaidSubgraph>,
 }
 

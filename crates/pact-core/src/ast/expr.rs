@@ -13,7 +13,9 @@ use crate::span::Span;
 /// An expression node in the PACT AST.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expr {
+    /// The kind of expression this node represents.
     pub kind: ExprKind,
+    /// Source location of this expression.
     pub span: Span,
 }
 
@@ -58,17 +60,27 @@ pub enum ExprKind {
 
     /// Agent dispatch: `@agent -> #tool(args)`.
     AgentDispatch {
+        /// The agent being dispatched.
         agent: Box<Expr>,
+        /// The tool the agent should invoke.
         tool: Box<Expr>,
+        /// Arguments passed to the tool.
         args: Vec<Expr>,
     },
 
     /// Pipeline: `expr |> expr`.
-    Pipeline { left: Box<Expr>, right: Box<Expr> },
+    Pipeline {
+        /// Left-hand side of the pipeline.
+        left: Box<Expr>,
+        /// Right-hand side of the pipeline.
+        right: Box<Expr>,
+    },
 
     /// Fallback chain: `expr ?> expr`.
     FallbackChain {
+        /// The primary expression to attempt.
         primary: Box<Expr>,
+        /// The fallback expression if the primary fails.
         fallback: Box<Expr>,
     },
 
@@ -77,20 +89,35 @@ pub enum ExprKind {
 
     /// Match expression: `match expr { pattern => body, ... }`.
     Match {
+        /// The expression being matched on.
         subject: Box<Expr>,
+        /// The match arms to evaluate in order.
         arms: Vec<MatchArm>,
     },
 
     /// Field access: `expr.field`.
-    FieldAccess { object: Box<Expr>, field: String },
+    FieldAccess {
+        /// The object expression to access.
+        object: Box<Expr>,
+        /// The field name being accessed.
+        field: String,
+    },
 
     /// Function / tool call: `name(args)`.
-    FuncCall { callee: Box<Expr>, args: Vec<Expr> },
+    FuncCall {
+        /// The function or tool being called.
+        callee: Box<Expr>,
+        /// Arguments passed to the function.
+        args: Vec<Expr>,
+    },
 
     /// Binary operation: `a + b`, `a == b`, etc.
     BinOp {
+        /// Left operand.
         left: Box<Expr>,
+        /// The binary operator.
         op: BinOpKind,
+        /// Right operand.
         right: Box<Expr>,
     },
 
@@ -101,7 +128,12 @@ pub enum ExprKind {
     Fail(Box<Expr>),
 
     /// Variable binding: `name = expr` (used as a statement-expression).
-    Assign { name: String, value: Box<Expr> },
+    Assign {
+        /// The variable name being assigned.
+        name: String,
+        /// The value expression to bind.
+        value: Box<Expr>,
+    },
 
     /// Record literal used in test blocks: `record { ... }`.
     Record(Vec<Expr>),
@@ -110,7 +142,12 @@ pub enum ExprKind {
     Assert(Box<Expr>),
 
     /// Typed expression for parameter passing: `expr :: Type`.
-    Typed { expr: Box<Expr>, ty: TypeExpr },
+    Typed {
+        /// The expression being annotated.
+        expr: Box<Expr>,
+        /// The type annotation.
+        ty: TypeExpr,
+    },
 
     /// List literal: `[a, b, c]`.
     ListLit(Vec<Expr>),
@@ -130,7 +167,12 @@ pub enum ExprKind {
     Env(String),
 
     /// Flow call: `run flow_name(arg1, arg2)`.
-    RunFlow { flow_name: String, args: Vec<Expr> },
+    RunFlow {
+        /// The name of the flow to invoke.
+        flow_name: String,
+        /// Arguments passed to the flow.
+        args: Vec<Expr>,
+    },
 }
 
 /// A single arm in a `match` expression.
@@ -140,6 +182,7 @@ pub struct MatchArm {
     pub pattern: MatchPattern,
     /// The body expression to evaluate if the pattern matches.
     pub body: Expr,
+    /// Source location of this match arm.
     pub span: Span,
 }
 
@@ -161,14 +204,24 @@ pub enum MatchPattern {
 /// Binary operators.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinOpKind {
+    /// Addition (`+`).
     Add,
+    /// Subtraction (`-`).
     Sub,
+    /// Multiplication (`*`).
     Mul,
+    /// Division (`/`).
     Div,
+    /// Equality (`==`).
     Eq,
+    /// Inequality (`!=`).
     Neq,
+    /// Less than (`<`).
     Lt,
+    /// Greater than (`>`).
     Gt,
+    /// Less than or equal (`<=`).
     LtEq,
+    /// Greater than or equal (`>=`).
     GtEq,
 }

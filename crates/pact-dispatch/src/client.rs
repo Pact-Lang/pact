@@ -9,6 +9,7 @@ use crate::DispatchError;
 use futures_util::StreamExt;
 use pact_build::emit_claude::ClaudeRequest;
 use tokio::sync::mpsc;
+use tracing::warn;
 
 /// The Anthropic API version header value.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -22,13 +23,21 @@ pub enum StreamEvent {
     /// A chunk of text content.
     TextDelta(String),
     /// Tool use block started.
-    ToolUseStart { id: String, name: String },
+    ToolUseStart {
+        /// Unique identifier for this tool use block.
+        id: String,
+        /// Name of the tool being invoked.
+        name: String,
+    },
     /// Tool use input delta (JSON chunk).
     ToolUseInputDelta(String),
     /// Content block finished.
     ContentBlockStop,
     /// Message completed with stop reason.
-    MessageDone { stop_reason: StopReason },
+    MessageDone {
+        /// Why the model stopped generating.
+        stop_reason: StopReason,
+    },
 }
 
 /// HTTP client wrapper for the Anthropic Messages API.
@@ -53,9 +62,18 @@ impl AnthropicClient {
     }
 
     /// Create a client with the given API key.
+    ///
+    /// Configures a 90-second request timeout for token-heavy requests.
     pub fn new(api_key: String) -> Self {
+        let http = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(90))
+            .build()
+            .unwrap_or_else(|e| {
+                warn!(error = %e, "TLS client build failed, falling back to default");
+                reqwest::Client::new()
+            });
         Self {
-            http: reqwest::Client::new(),
+            http,
             api_key,
             base_url: DEFAULT_BASE_URL.to_string(),
         }
@@ -67,42 +85,77 @@ impl AnthropicClient {
         self
     }
 
+    /// Maximum number of retries for transient API errors (429, 5xx).
+    const MAX_RETRIES: u32 = 3;
+
     /// Send a Messages API request and return the parsed response.
+    ///
+    /// Automatically retries on transient errors (429 Too Many Requests, 5xx)
+    /// with exponential backoff.
     pub async fn send_message(
         &self,
         request: &ClaudeRequest,
     ) -> Result<MessagesResponse, DispatchError> {
         let url = format!("{}/v1/messages", self.base_url);
 
-        let response = self
-            .http
-            .post(&url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .header("content-type", "application/json")
-            .json(request)
-            .send()
-            .await
-            .map_err(|e| DispatchError::HttpError(e.to_string()))?;
+        let mut last_err = None;
+        for attempt in 0..=Self::MAX_RETRIES {
+            if attempt > 0 {
+                let delay_ms = 1000 * 2u64.pow(attempt - 1); // 1s, 2s, 4s
+                warn!(attempt, delay_ms, max = Self::MAX_RETRIES, "API retry");
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
 
-        let status = response.status();
-        if !status.is_success() {
+            let response = match self
+                .http
+                .post(&url)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("content-type", "application/json")
+                .json(request)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    last_err = Some(DispatchError::HttpError(e.to_string()));
+                    continue;
+                }
+            };
+
+            let status = response.status();
+            if status.is_success() {
+                let resp: MessagesResponse = response
+                    .json()
+                    .await
+                    .map_err(|e| DispatchError::ParseError(e.to_string()))?;
+                return Ok(resp);
+            }
+
             let body = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "unknown error".to_string());
+
+            // Retry on 429 (rate limited) or 5xx (server error)
+            if status.as_u16() == 429 || status.is_server_error() {
+                last_err = Some(DispatchError::ApiError {
+                    status: status.as_u16(),
+                    body,
+                });
+                continue;
+            }
+
+            // Non-retryable error
             return Err(DispatchError::ApiError {
                 status: status.as_u16(),
                 body,
             });
         }
 
-        let resp: MessagesResponse = response
-            .json()
-            .await
-            .map_err(|e| DispatchError::ParseError(e.to_string()))?;
-
-        Ok(resp)
+        Err(last_err.unwrap_or_else(|| {
+            DispatchError::HttpError("all retry attempts exhausted".to_string())
+        }))
     }
 
     /// Send a message with streaming enabled.

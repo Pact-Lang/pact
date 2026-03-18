@@ -1,0 +1,429 @@
+---
+title: Coffee Website Builder — Full PACT Feature Showcase
+---
+agentflow LR
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Permission Tree
+    %% Shape: circle | Security envelope for the entire program.
+    %% camelCase expands to ^dot.notation:
+    %%   llmQuery → ^llm.query, netRead → ^net.read, fsWrite → ^fs.write
+    %% ══════════════════════════════════════════════════════════════════
+
+    permissions(("Permissions"))@{
+        llm: [llmQuery, llmVision]
+        net: [netRead, netWrite]
+        fs: [fsRead, fsWrite]
+        sh: [shExec]
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Schemas
+    %% Shape: hexagon | Typed data structures.
+    %% ══════════════════════════════════════════════════════════════════
+
+    coffee_shop{{"CoffeeShop"}}@{
+        Fields:
+            name: String
+            city: String
+            style: String
+            menu_count: Int
+    }
+
+    review_result{{"ReviewResult"}}@{
+        Fields:
+            score: Float
+            passed: Bool
+            feedback: String
+            suggestions: List<String>
+    }
+
+    page_asset{{"PageAsset"}}@{
+        Fields:
+            html: String
+            css: String
+            preview_url: String
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Type Aliases
+    %% Shape: diamond | Union / enum types.
+    %% ══════════════════════════════════════════════════════════════════
+
+    language{"Language"}@{
+        variants: [English, Swedish, Norwegian, Finnish]
+    }
+
+    design_style{"DesignStyle"}@{
+        variants: [Minimalist, Rustic, Modern, Industrial]
+    }
+
+    content_tone{"ContentTone"}@{
+        variants: [Warm, Professional, Playful, Bold]
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Templates
+    %% Shape: subroutine (double-bordered rect) | Output format specs.
+    %% Fields have type, optional multiplier (* N), and description.
+    %% Sections are named prompt blocks without a type.
+    %% ══════════════════════════════════════════════════════════════════
+
+    coffee_copy[["Coffee Copy"]]@{
+        Fields:
+            HERO_TAGLINE: String = "one punchy headline for the hero"
+            HERO_SUBTITLE: String = "one compelling subtitle, max 20 words"
+            ABOUT_STORY: String = "two paragraphs about the shop's origin and values"
+            ABOUT_SOURCING: String = "paragraph about ethical bean sourcing"
+            MENU_ITEM: String * 8 = "Name | Price | Tasting Notes"
+            CONTACT_CTA: String = "a warm call-to-action for the contact form"
+    }
+
+    seo_metadata[["SEO Metadata"]]@{
+        Fields:
+            TITLE: String = "page title, 60 chars max"
+            DESCRIPTION: String = "meta description, 160 chars max"
+            OG_IMAGE_ALT: String = "alt text for social media card"
+        Sections:
+            KEYWORDS: "comma-separated SEO keywords for a coffee shop"
+    }
+
+    bilingual_page[["Bilingual Page"]]@{
+        Sections:
+            PRIMARY: "the original copy in the primary language"
+            SECONDARY: "faithful translation in the secondary language"
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Directives
+    %% Shape: trapezoid | Composable prompt blocks with {param} placeholders.
+    %% ══════════════════════════════════════════════════════════════════
+
+    nordic_design[/"Nordic Design"/]@{
+        text: "DESIGN SYSTEM: Use {heading_font} for headings, {body_font} for body text. Color palette: espresso brown #3C2415, cream #FFF8F0, sage green #8B9D77, amber accent #D4A574, slate blue #5B7B8A. CSS custom properties for all colors. Dark mode with prefers-color-scheme. When language switches to {secondary_lang}, shift accents to cooler Nordic tones."
+        Params:
+            heading_font: String = "Playfair Display"
+            body_font: String = "Inter"
+            secondary_lang: String = "sv"
+    }
+
+    glassmorphism[/"Glassmorphism"/]@{
+        text: "LAYOUT: Fixed glassmorphism navbar with backdrop-filter: blur(12px). Full-viewport hero with parallax scrolling. Menu section as CSS Grid with hover card animations (translateY -4px, box-shadow elevation). About section with split layout. Contact form with floating labels. Sticky footer."
+    }
+
+    scroll_animations[/"Scroll Animations"/]@{
+        text: "ANIMATIONS: CSS @keyframes with IntersectionObserver for scroll-triggered fade-in-up on each section. Hero title: typewriter reveal. Menu cards: stagger entrance by 100ms. Smooth parallax on scroll. Language toggle: cross-fade with 300ms opacity transition."
+    }
+
+    accessibility[/"Accessibility"/]@{
+        text: "A11Y: All images need descriptive alt text. Semantic HTML. {min_contrast_ratio}:1 contrast ratio. prefers-reduced-motion. Skip-to-content link. aria-labels on interactive elements. Logical tab order."
+        Params:
+            min_contrast_ratio: String = "4.5"
+    }
+
+    bilingual_toggle[/"Bilingual Toggle"/]@{
+        text: "LANGUAGE TOGGLE: Prominent {lang_a}/{lang_b} pill toggle in navbar. data-lang attributes. Cross-fade text on switch. Shift accent colors to {nordic_accent} in {lang_b} mode. Persist preference in localStorage."
+        Params:
+            lang_a: String = "en"
+            lang_b: String = "sv"
+            nordic_accent: String = "#5B7B8A"
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Skills
+    %% Shape: stadium (rounded rect) | Composite capabilities.
+    %% Skills bundle multiple tools with a strategy prompt.
+    %% ══════════════════════════════════════════════════════════════════
+
+    content_pipeline(["Content Pipeline"])@{
+        description: "Research a location, write marketing copy, and translate it — producing complete bilingual content ready for design."
+        tools: [research_location, write_copy, translate]
+        strategy: "First research the location. Use the research brief to write English copy. Then translate to the target language. Return bilingual output."
+        Params:
+            query: String
+            target_language: String
+            tone: String
+        Returns: String
+    }
+
+    quality_assurance(["Quality Assurance"])@{
+        description: "Review, score, and optionally regenerate content until it meets the quality threshold."
+        tools: [review_quality, write_copy]
+        strategy: "Review the content against the checklist. If score is below the threshold, regenerate with feedback. Max 3 iterations."
+        Params:
+            content: String
+            threshold: Int
+        Returns: String
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Agents
+    %% Shape: subgraph | Agent containers with tools & skills inside.
+    %% Agent metadata: permits, model, prompt, memory.
+    %% ══════════════════════════════════════════════════════════════════
+
+    subgraph researcher["@researcher"]@{
+        permits: [netRead, llmQuery]
+        model: "claude-sonnet-4-20250514"
+        prompt: "You are a market research specialist and copywriter for premium coffee brands. Deliver actual content, never describe what you will do. Reference the local area by name. Be evocative and specific."
+        memory: [research_cache, brand_voice]
+        skills: [content_pipeline]
+    }
+
+        research_location["Research Location"]@{
+            description: "Research a city for coffee culture context: local roasters, popular neighborhoods, demographics, climate, and competitor landscape."
+            requires: [netRead]
+            source: search.duckduckgo(query)
+            Params:
+                query: String
+            Returns: String
+            cache: "24h"
+        }
+
+        write_copy["Write Copy"]@{
+            description: "Write vivid marketing copy for a coffee shop website. Reference the local area. Follow the output template structure exactly."
+            requires: [llmQuery]
+            output: coffee_copy
+            Params:
+                brief: String
+                tone: String
+            Returns: String
+            retry: 2
+            validate: strict
+        }
+
+    end
+
+    subgraph translator["@translator"]@{
+        permits: [llmQuery]
+        model: "claude-sonnet-4-20250514"
+        prompt: "You are a native translator specializing in hospitality marketing. Translate immediately — never explain or describe your process. Use informal address (du-form). Adapt idioms naturally."
+        memory: [glossary]
+    }
+
+        translate["Translate"]@{
+            description: "Translate marketing copy faithfully. Adapt idioms naturally. Keep section labels unchanged."
+            requires: [llmQuery]
+            output: bilingual_page
+            Params:
+                content: String
+                target_language: String
+            Returns: String
+            retry: 1
+        }
+
+    end
+
+    subgraph designer["@designer"]@{
+        permits: [llmQuery, llmVision]
+        model: "claude-sonnet-4-20250514"
+        prompt: "Senior frontend developer at a top creative agency. Awwwards-quality. Production HTML/CSS/JS. Modern CSS: grid, custom properties, clamp(), backdrop-filter. IntersectionObserver animations. SVG illustrations. Only raw HTML."
+    }
+
+        generate_html["Generate HTML"]@{
+            description: "Generate a complete single-page HTML website with inline CSS and JS. Return ONLY raw HTML starting with DOCTYPE."
+            requires: [llmQuery]
+            directives: [nordic_design, glassmorphism, scroll_animations, accessibility, bilingual_toggle]
+            Params:
+                content: String
+                shop_name: String
+            Returns: String
+            retry: 1
+        }
+
+        generate_seo["Generate SEO"]@{
+            description: "Generate SEO metadata optimized for local coffee shop discovery."
+            requires: [llmQuery]
+            output: seo_metadata
+            Params:
+                shop_name: String
+                city: String
+                copy: String
+            Returns: String
+        }
+
+    end
+
+    subgraph reviewer["@reviewer"]@{
+        permits: [llmQuery, llmVision]
+        model: "claude-sonnet-4-20250514"
+        prompt: "QA engineer specializing in web accessibility and performance. Score objectively. Specific, actionable feedback with line references."
+        skills: [quality_assurance]
+    }
+
+        review_quality["Review Quality"]@{
+            description: "Review HTML quality: accessibility, responsive design, performance, semantic HTML. Score 0-100."
+            requires: [llmQuery, llmVision]
+            Params:
+                html: String
+                checklist: List<String>
+            Returns: String
+            validate: strict
+        }
+
+    end
+
+    subgraph publisher["@publisher"]@{
+        permits: [fsWrite, netWrite, shExec]
+        prompt: "Deployment specialist. Save files cleanly. Deploy previews reliably. Return the preview URL."
+    }
+
+        save_to_disk["Save to Disk"]@{
+            description: "Save content to the filesystem at the given path."
+            requires: [fsWrite]
+            handler: "sh echo '{content}' > {path}"
+            Params:
+                path: String
+                content: String
+            Returns: String
+        }
+
+        deploy_preview["Deploy Preview"]@{
+            description: "Deploy HTML to a preview server and return the URL."
+            requires: [netWrite, shExec]
+            handler: "sh npx serve {directory} --single --listen {port}"
+            Params:
+                directory: String
+                port: Int
+            Returns: String
+        }
+
+    end
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Agent Bundle — with fallback chain
+    %% Nested subgraph wrapping agents into a team.
+    %% ══════════════════════════════════════════════════════════════════
+
+    subgraph coffee_team["@coffee_team"]@{
+        type: bundle
+    }
+        researcher
+        translator
+        designer
+        reviewer
+        publisher
+    end
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Flows
+    %% Shape: lean-right (asymmetric) | Execution entry points.
+    %% ══════════════════════════════════════════════════════════════════
+
+    classify_style>"classify_style"]@{
+        Params:
+            request: String
+        Returns: String
+        match: { "minimal" => "Minimalist", "cozy" => "Rustic", _ => "Modern" }
+    }
+
+    build_checklist>"build_checklist"]@{
+        Params:
+            style: String
+        Returns: List<String>
+    }
+
+    build_coffee_site>"build_coffee_site"]@{
+        Params:
+            shop: CoffeeShop
+            language: Language
+        Returns: PageAsset
+    }
+
+    quick_preview>"quick_preview"]@{
+        Params:
+            shop_name: String
+            city: String
+        Returns: String
+    }
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Tests
+    %% Shape: double-circle | Inline verification.
+    %% ══════════════════════════════════════════════════════════════════
+
+    test_style_unknown((("classify_style: unknown => Modern")))
+    test_style_minimal((("classify_style: minimal => Minimalist")))
+    test_style_cozy((("classify_style: cozy => Rustic")))
+    test_checklist((("build_checklist returns a list")))
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Flow Edges — execution dispatch (solid arrows -->)
+    %% Edge labels carry the variable binding from each step.
+    %% ══════════════════════════════════════════════════════════════════
+
+    %% build_coffee_site main pipeline
+    build_coffee_site -->|"query"| research_location
+    research_location -->|"research"| write_copy
+    write_copy -->|"english_copy"| translate
+    translate -->|"bilingual"| generate_html
+
+    %% Parallel: HTML + SEO generation
+    build_coffee_site -->|"parallel"| generate_html
+    build_coffee_site -->|"parallel"| generate_seo
+
+    %% Quality review with fallback chain
+    generate_html -->|"html"| review_quality
+
+    %% Save to disk
+    review_quality -->|"save"| save_to_disk
+    save_to_disk -->|"return result"| build_coffee_site
+
+    %% Parallel: classify_style + build_checklist (run expressions)
+    build_coffee_site -->|"run"| classify_style
+    build_coffee_site -->|"run"| build_checklist
+
+    %% quick_preview delegates to build_coffee_site
+    quick_preview -->|"run"| build_coffee_site
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Pipeline Edges — data transformation (thick arrows ==>)
+    %% Represents the |> pipeline operator in PACT.
+    %% ══════════════════════════════════════════════════════════════════
+
+    write_copy ==>|"english_copy |>"| translate
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Fallback Edges — fallback chain (dotted arrows -.->)
+    %% Represents the ?> fallback operator in PACT.
+    %% ══════════════════════════════════════════════════════════════════
+
+    designer -.->|"fallback"| researcher
+
+    %% ══════════════════════════════════════════════════════════════════
+    %% Reference Edges — structural references (dashed lines -.-)
+    %% Tool → template (output), tool → directive, flow → schema
+    %% ══════════════════════════════════════════════════════════════════
+
+    %% Tool → Template references (output format)
+    write_copy -.-|"output"| coffee_copy
+    translate -.-|"output"| bilingual_page
+    generate_seo -.-|"output"| seo_metadata
+
+    %% Tool → Directive references (prompt blocks)
+    generate_html -.-|"directive"| nordic_design
+    generate_html -.-|"directive"| glassmorphism
+    generate_html -.-|"directive"| scroll_animations
+    generate_html -.-|"directive"| accessibility
+    generate_html -.-|"directive"| bilingual_toggle
+
+    %% Flow → Schema references (parameter types)
+    build_coffee_site -.-|"param type"| coffee_shop
+    build_coffee_site -.-|"param type"| language
+    build_coffee_site -.-|"return type"| page_asset
+
+    %% Flow → Type Alias references
+    classify_style -.-|"match on"| design_style
+
+    %% Test → Flow references
+    test_style_unknown -.-|"tests"| classify_style
+    test_style_minimal -.-|"tests"| classify_style
+    test_style_cozy -.-|"tests"| classify_style
+    test_checklist -.-|"tests"| build_checklist
+
+    %% Skill → Tool references
+    content_pipeline -.-|"uses"| research_location
+    content_pipeline -.-|"uses"| write_copy
+    content_pipeline -.-|"uses"| translate
+    quality_assurance -.-|"uses"| review_quality
+    quality_assurance -.-|"uses"| write_copy

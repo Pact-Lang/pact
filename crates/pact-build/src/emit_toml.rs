@@ -25,23 +25,34 @@ use crate::config::BuildConfig;
 /// Top-level project manifest.
 #[derive(Serialize)]
 pub struct Manifest {
+    /// Project metadata section.
     pub pact: ManifestMeta,
+    /// Declared agents in the project.
     pub agents: ManifestList,
+    /// Declared tools in the project.
     pub tools: ManifestList,
+    /// Declared skills in the project (omitted when empty).
     #[serde(skip_serializing_if = "ManifestList::is_empty")]
     pub skills: ManifestList,
+    /// Declared flows in the project.
     pub flows: ManifestList,
 }
 
+/// Metadata for the project manifest (`[pact]` section).
 #[derive(Serialize)]
 pub struct ManifestMeta {
+    /// PACT specification version.
     pub version: String,
+    /// Source file name.
     pub source: String,
+    /// Build target platform.
     pub target: String,
 }
 
+/// A named list of declaration identifiers used in the manifest.
 #[derive(Serialize)]
 pub struct ManifestList {
+    /// Names of the declared items.
     pub list: Vec<String>,
 }
 
@@ -54,102 +65,148 @@ impl ManifestList {
 /// Agent TOML config.
 #[derive(Serialize)]
 pub struct AgentConfig {
+    /// Inner agent configuration section.
     pub agent: AgentConfigInner,
 }
 
+/// Inner fields for an agent's TOML configuration.
 #[derive(Serialize)]
 pub struct AgentConfigInner {
+    /// Agent identifier.
     pub name: String,
+    /// Optional LLM model override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Path to the agent's prompt file.
     pub prompt_file: String,
+    /// Permissions granted to this agent.
     pub permissions: AgentPermissions,
+    /// Tools available to this agent.
     pub tools: AgentToolList,
 }
 
+/// Permissions granted to an agent.
 #[derive(Serialize)]
 pub struct AgentPermissions {
+    /// Permission paths granted to the agent.
     pub granted: Vec<String>,
 }
 
+/// List of tools available to an agent.
 #[derive(Serialize)]
 pub struct AgentToolList {
+    /// Tool names bound to the agent.
     pub list: Vec<String>,
 }
 
 /// Tool TOML config.
 #[derive(Serialize)]
 pub struct ToolConfig {
+    /// Inner tool configuration section.
     pub tool: ToolConfigInner,
 }
 
+/// Inner fields for a tool's TOML configuration.
 #[derive(Serialize)]
 pub struct ToolConfigInner {
+    /// Tool identifier.
     pub name: String,
+    /// Human-readable description of the tool.
     pub description: String,
+    /// Permissions required by this tool.
     pub permissions: ToolPermissions,
+    /// Parameter definitions for the tool.
     pub params: Vec<ToolParam>,
+    /// Optional return type name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub returns: Option<String>,
 }
 
+/// Permissions required by a tool.
 #[derive(Serialize)]
 pub struct ToolPermissions {
+    /// Permission paths the tool requires.
     pub requires: Vec<String>,
 }
 
+/// A single tool or skill parameter definition.
 #[derive(Serialize)]
 pub struct ToolParam {
+    /// Parameter name.
     pub name: String,
+    /// Type of the parameter (serialized as `type`).
     #[serde(rename = "type")]
     pub ty: String,
+    /// Whether the parameter is required.
     pub required: bool,
 }
 
 /// Flow TOML config.
 #[derive(Serialize)]
 pub struct FlowConfig {
+    /// Inner flow configuration section.
     pub flow: FlowConfigInner,
 }
 
+/// Inner fields for a flow's TOML configuration.
 #[derive(Serialize)]
 pub struct FlowConfigInner {
+    /// Flow identifier.
     pub name: String,
+    /// Optional return type of the flow.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_type: Option<String>,
+    /// Input parameters for the flow.
     pub params: Vec<FlowParam>,
+    /// Ordered agent-dispatch steps in the flow.
     pub steps: Vec<FlowStep>,
 }
 
+/// A single flow parameter definition.
 #[derive(Serialize)]
 pub struct FlowParam {
+    /// Parameter name.
     pub name: String,
+    /// Type of the parameter (serialized as `type`).
     #[serde(rename = "type")]
     pub ty: String,
 }
 
+/// A single agent-dispatch step within a flow.
 #[derive(Serialize)]
 pub struct FlowStep {
+    /// Variable that receives the step result.
     pub variable: String,
+    /// Agent invoked in this step.
     pub agent: String,
+    /// Tool dispatched to the agent.
     pub tool: String,
+    /// Arguments passed to the tool.
     pub args: Vec<String>,
 }
 
 /// Skill TOML config.
 #[derive(Serialize)]
 pub struct SkillConfig {
+    /// Inner skill configuration section.
     pub skill: SkillConfigInner,
 }
 
+/// Inner fields for a skill's TOML configuration.
 #[derive(Serialize)]
 pub struct SkillConfigInner {
+    /// Skill identifier.
     pub name: String,
+    /// Human-readable description of the skill.
     pub description: String,
+    /// Tools composed into this skill.
     pub tools: Vec<String>,
+    /// Optional execution strategy for the skill.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strategy: Option<String>,
+    /// Parameter definitions for the skill.
     pub params: Vec<ToolParam>,
+    /// Optional return type name.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub returns: Option<String>,
 }
@@ -157,12 +214,16 @@ pub struct SkillConfigInner {
 /// Permissions TOML config.
 #[derive(Serialize)]
 pub struct PermissionsConfig {
+    /// Flattened permission tree entries.
     pub permissions: Vec<PermissionEntry>,
 }
 
+/// A single node in the flattened permission tree.
 #[derive(Serialize)]
 pub struct PermissionEntry {
+    /// Dot-separated permission path.
     pub path: String,
+    /// Child permission paths under this node.
     pub children: Vec<String>,
 }
 

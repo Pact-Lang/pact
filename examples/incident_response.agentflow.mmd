@@ -1,0 +1,174 @@
+agentflow LR
+    Incident{{"Incident"}}@{
+        fields:
+            id: "String"
+            region: "String"
+            services: "List<String>"
+            severity: "String"
+            start_time: "String"
+            status: "String"
+            title: "String"
+    }
+    Finding{{"Finding"}}@{
+        fields:
+            category: "String"
+            confidence: "String"
+            evidence: "String"
+            recommendation: "String"
+    }
+    HealthCheck{{"HealthCheck"}}@{
+        fields:
+            error_rate_pct: "Float"
+            latency_p99_ms: "Int"
+            region: "String"
+            service: "String"
+            status: "String"
+    }
+    triage_result[["triage_result"]]@{
+        fields:
+            AFFECTED_SERVICES: "String"
+            BLAST_RADIUS: "String"
+            ESCALATION: "String"
+            INCIDENT_ID: "String"
+            INITIAL_HYPOTHESIS: "String"
+            SEVERITY: "String"
+            TIMELINE: "String * 3"
+            TITLE: "String"
+    }
+    investigation_report[["investigation_report"]]@{
+        fields:
+            ANOMALY: "String * 5"
+            CORRELATION: "String"
+            DEPENDENCY_MAP: "String"
+            EVIDENCE: "String * 3"
+            METRICS_ANALYSIS: "String"
+            SUMMARY: "String"
+    }
+    runbook_format[["runbook_format"]]@{
+        fields:
+            COMMUNICATION: "String"
+            ESCALATION_PATH: "String"
+            OBJECTIVE: "String"
+            PREREQUISITES: "String"
+            STEP: "String * 8"
+            VERIFICATION: "String"
+    }
+    incident_dashboard_style[/"incident_dashboard_style"/]@{
+        text: "DESIGN SYSTEM: Dark-mode incident dashboard.
+    Background: #0d1117 (GitHub dark). Cards: #161b22 with 1px #30363d borders.
+    Accent colors: Critical #f85149, Warning #d29922, Info #58a6ff, Success #3fb950.
+    Typography: 'JetBrains Mono' for metrics, 'Inter' for body text via Google Fonts.
+    Layout: CSS Grid — severity banner at top, two-column layout below.
+    Left column (60%): timeline + investigation. Right column (40%): metrics + runbook.
+    SVG status indicators: pulsing red dot for active incident, green for resolved.
+    Cards should have subtle box-shadow: 0 1px 3px rgba(0,0,0,0.3).
+    Responsive: stack to single column below 768px.
+    Include a dark-mode scrollbar style. No images — all visual elements via CSS and inline SVG.
+    The page should feel like a real SRE war room dashboard — data-dense, scannable, professional."
+        params:
+            heading_font: "String = Inter"
+            mono_font: "String = JetBrains Mono"
+    }
+
+    subgraph sentinel["@sentinel"]
+        direction LR
+
+        poll_health["Poll Health"]@{
+        description: "Poll service health endpoints for a given region. Returns a JSON array of health check results for all monitored services. MOCK DATA — return this exact JSON for any region query:
+[
+  {"service": "api-gateway", "status": "DEGRADED", "latency_p99_ms": 12000, "error_rate_pct": 34.2, "region": "us-east-1", "timestamp": "2026-03-18T14:23:00Z"},
+  {"service": "payment-service", "status": "DEGRADED", "latency_p99_ms": 8500, "error_rate_pct": 28.7, "region": "us-east-1", "timestamp": "2026-03-18T14:23:05Z"},
+  {"service": "user-service", "status": "DEGRADED", "latency_p99_ms": 6200, "error_rate_pct": 19.1, "region": "us-east-1", "timestamp": "2026-03-18T14:23:03Z"},
+  {"service": "order-service", "status": "HEALTHY", "latency_p99_ms": 120, "error_rate_pct": 0.3, "region": "us-east-1", "timestamp": "2026-03-18T14:23:00Z"},
+  {"service": "inventory-service", "status": "HEALTHY", "latency_p99_ms": 85, "error_rate_pct": 0.1, "region": "us-east-1", "timestamp": "2026-03-18T14:23:00Z"}
+]
+Return this JSON exactly — do not modify or summarize it."
+        requires: ["^llm.query"]
+        params:
+            region: "String"
+        returns: "String"
+    }
+        detect_anomaly["Detect Anomaly"]@{
+        description: "You are an observability engineer analyzing raw health check data. Given JSON health-check results from multiple services, determine if there is an active incident. Compare each metric against normal baselines: p99 latency should be under 500ms, error rates should be under 2%, all services should report HEALTHY. If you detect anomalies, produce a single CRITICAL/WARNING/INFO alert string that summarizes ALL anomalies found — include specific service names, metric values, affected region, and timestamp. If everything looks normal, respond with just the word HEALTHY. Be precise and quantitative."
+        requires: ["^llm.query"]
+        params:
+            health_data: "String"
+        returns: "String"
+    }
+    end
+
+    subgraph monitor["@monitor"]
+        direction LR
+
+        triage_alert["Triage Alert"]@{
+        description: "You are an SRE triage specialist. Analyze a raw production alert and produce a structured triage assessment. Assign a severity level (P0-P4) based on user impact, blast radius, and revenue exposure. Identify affected services, generate a timeline from the alert signals, form an initial hypothesis, and recommend an escalation path. Be specific — reference actual service names, error codes, and metrics from the alert. Output must follow the triage_result template exactly."
+        requires: ["^llm.query"]
+        output: "%triage_result"
+        params:
+            alert: "String"
+        returns: "String"
+    }
+    end
+
+    subgraph investigator["@investigator"]
+        direction LR
+
+        analyze_incident["Analyze Incident"]@{
+        description: "You are a senior site reliability engineer performing deep incident investigation. Given a triage assessment, conduct a thorough analysis: examine the metrics patterns (latency percentiles, error rate curves, throughput drops), map service dependencies to identify cascade paths, find anomalies across the timeline, and correlate signals across services. Look for the failure propagation path — which service failed first and how it cascaded. Be quantitative: cite specific numbers, percentages, and timestamps. Output must follow the investigation_report template exactly."
+        requires: ["^llm.query"]
+        output: "%investigation_report"
+        params:
+            triage: "String"
+        returns: "String"
+    }
+        root_cause_analysis["Root Cause Analysis"]@{
+        description: "You are a principal engineer specializing in distributed systems failure analysis. Given the investigation report, determine the root cause with high confidence. Consider: recent deployments, configuration changes, infrastructure failures, capacity limits, dependency outages, and data corruption. Produce a clear causal chain from trigger to user impact. Distinguish between the root cause (why it happened), the trigger (what started it), and contributing factors (what made it worse). Cite specific evidence from the investigation for each conclusion. Format as a structured analysis with sections: Root Cause, Trigger Event, Contributing Factors, Causal Chain, and Confidence Assessment."
+        requires: ["^llm.query"]
+        params:
+            investigation: "String"
+        returns: "String"
+    }
+    end
+
+    subgraph responder["@responder"]
+        direction LR
+
+        generate_runbook["Generate Runbook"]@{
+        description: "You are an incident commander generating an actionable response runbook. Given the root cause analysis, produce step-by-step mitigation procedures. Each step must include: the specific action, exact commands or procedures (using realistic kubectl, AWS CLI, or service-specific commands), expected outcome, and rollback procedure if the step makes things worse. Include verification checks after each major step. Add a stakeholder communication template and escalation criteria. Be concrete — no vague instructions like 'investigate further'. Every step should be copy-pasteable by an on-call engineer at 3 AM. IMPORTANT: Never include long numeric strings (13+ digits) in your output — use short placeholder IDs like 'abc-1234' instead of realistic account numbers or resource IDs. Output must follow the runbook_format template exactly."
+        requires: ["^llm.query"]
+        output: "%runbook_format"
+        params:
+            root_cause: "String"
+        returns: "String"
+    }
+    end
+
+    subgraph reporter["@reporter"]
+        direction LR
+
+        create_report["Create Report"]@{
+        description: "You are a frontend engineer building an incident dashboard. Generate a complete, single-file HTML page that serves as a real-time incident report dashboard. Combine ALL previous pipeline outputs (triage, investigation, root cause, runbook) into a cohesive, data-dense dark-mode dashboard. Include: severity banner with pulsing SVG indicator, incident timeline with timestamps, metrics visualization using CSS bar charts, dependency graph using inline SVG, root cause causal chain, runbook steps with expandable sections, and a status footer. IMPORTANT: Never include long numeric strings (13+ digits) anywhere — use short IDs like 'INC-0318-001'. Return ONLY raw HTML starting with DOCTYPE. No markdown fences. No explanations. The dashboard should look like it belongs in a real SRE war room."
+        requires: ["^llm.query"]
+        directives: ["%incident_dashboard_style"]
+        params:
+            investigation: "String"
+            root_cause: "String"
+            runbook: "String"
+            triage: "String"
+        returns: "String"
+    }
+    end
+
+    triage_alert -.-> triage_result
+    analyze_incident -.-> investigation_report
+    generate_runbook -.-> runbook_format
+    create_report -.-> incident_dashboard_style
+
+    triage_alert -->|"triage"| analyze_incident
+    analyze_incident -->|"investigation"| root_cause_analysis
+    root_cause_analysis -->|"root_cause"| generate_runbook
+    generate_runbook -->|"runbook"| create_report
+    triage_alert -->|"triage"| create_report
+    analyze_incident -->|"investigation"| create_report
+    root_cause_analysis -->|"root_cause"| create_report
+    poll_health -->|"health_data"| detect_anomaly

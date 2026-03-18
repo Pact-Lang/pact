@@ -47,27 +47,60 @@ use thiserror::Error;
 /// Runtime error during interpretation.
 #[derive(Debug, Error, Diagnostic, Clone)]
 pub enum RuntimeError {
+    /// A referenced variable was not found in the current scope.
     #[error("undefined variable '{name}'")]
-    UndefinedVariable { name: String },
+    UndefinedVariable {
+        /// The variable name that was not found.
+        name: String,
+    },
 
+    /// A referenced flow was not declared in the program.
     #[error("flow '{name}' not found")]
-    FlowNotFound { name: String },
+    FlowNotFound {
+        /// The flow name that was not found.
+        name: String,
+    },
 
+    /// A referenced agent was not declared in the program.
     #[error("agent '@{name}' not found")]
-    AgentNotFound { name: String },
+    AgentNotFound {
+        /// The agent name that was not found.
+        name: String,
+    },
 
+    /// A value had an unexpected type at runtime.
     #[error("type error: expected {expected}, got {got}")]
-    TypeError { expected: String, got: String },
+    TypeError {
+        /// The expected type.
+        expected: String,
+        /// The actual type encountered.
+        got: String,
+    },
 
+    /// An `assert` expression evaluated to a falsy value.
     #[error("assertion failed")]
-    AssertionFailed { message: String },
+    AssertionFailed {
+        /// Description of the failed assertion.
+        message: String,
+    },
 
+    /// A `fail` expression was executed.
     #[error("explicit fail: {message}")]
-    ExplicitFail { message: String },
+    ExplicitFail {
+        /// The failure message.
+        message: String,
+    },
 
+    /// A flow was called with the wrong number of arguments.
     #[error("wrong number of arguments: expected {expected}, got {got}")]
-    ArityMismatch { expected: usize, got: usize },
+    ArityMismatch {
+        /// The expected number of arguments.
+        expected: usize,
+        /// The actual number of arguments provided.
+        got: usize,
+    },
 
+    /// A general runtime error.
     #[error("runtime error: {0}")]
     RuntimeError(String),
 }

@@ -38,11 +38,26 @@ use crate::span::SourceMap;
 #[derive(Debug, Clone)]
 pub enum LoadError {
     /// An I/O error occurred while reading a file.
-    Io { path: PathBuf, message: String },
+    Io {
+        /// The file path that caused the error.
+        path: PathBuf,
+        /// The error message.
+        message: String,
+    },
     /// A lexer error occurred in the specified file.
-    Lex { path: PathBuf, message: String },
+    Lex {
+        /// The file path that caused the error.
+        path: PathBuf,
+        /// The error message.
+        message: String,
+    },
     /// A parser error occurred in the specified file.
-    Parse { path: PathBuf, message: String },
+    Parse {
+        /// The file path that caused the error.
+        path: PathBuf,
+        /// The error message.
+        message: String,
+    },
 }
 
 impl std::fmt::Display for LoadError {

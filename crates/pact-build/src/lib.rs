@@ -40,11 +40,17 @@
 //! # }
 //! ```
 
+/// Built-in capability provider definitions.
 pub mod builtins;
+/// Build configuration and target selection.
 pub mod config;
+/// Claude tool_use JSON emission.
 pub mod emit_claude;
+/// Markdown prompt generation.
 pub mod emit_markdown;
+/// TOML configuration emission.
 pub mod emit_toml;
+/// Runtime guardrail enforcement helpers.
 pub mod guardrails;
 
 use config::BuildConfig;
@@ -55,9 +61,11 @@ use thiserror::Error;
 /// Errors that can occur during the build process.
 #[derive(Debug, Error)]
 pub enum BuildError {
+    /// An I/O error occurred while writing output files.
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// The input program contains no declarations.
     #[error("no declarations found in program")]
     EmptyProgram,
 }

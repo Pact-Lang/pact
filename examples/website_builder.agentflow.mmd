@@ -1,0 +1,175 @@
+---
+title: Website Builder — Bilingual Coffee Shop Site
+---
+agentflow LR
+
+    %% ── Permission Tree ─────────────────────────────────────────────
+    %% Shape: circle | Represents the security envelope.
+    %% In PACT every permission starts with the ^ sigil.
+    %% In agentflow we use camelCase shorthand that expands automatically:
+    %%   llmQuery  →  ^llm.query
+    %%   netRead   →  ^net.read
+
+    permissions(("Permissions"))@{
+        llm: [llmQuery]
+        net: [netRead]
+    }
+
+    %% ── Templates ───────────────────────────────────────────────────
+    %% Shape: subroutine (double-bordered rect)
+    %% Reusable output format specifications.
+    %% Fields carry type, optional multiplier (* N), and description.
+    %% Sections are named blocks without a type.
+
+    website_copy[["Website Copy"]]@{
+        Fields:
+            HERO_TAGLINE: String = "one powerful headline"
+            HERO_SUBTITLE: String = "one compelling subtitle"
+            ABOUT: String = "two paragraphs about the coffee shop, its story, values"
+            MENU_ITEM: String * 6 = "Name | Price | Description"
+    }
+
+    bilingual[["Bilingual"]]@{
+        Sections:
+            ENGLISH: "paste the original English copy exactly as received"
+            SWEDISH: "translate every line to Swedish, keep section labels unchanged"
+    }
+
+    %% ── Directives ──────────────────────────────────────────────────
+    %% Shape: trapezoid
+    %% Composable prompt blocks. Parameters use {placeholder} syntax
+    %% inside the text body, with typed defaults in Params.
+
+    scandinavian_design[/"Scandinavian Design"/]@{
+        text: "DESIGN: Use Google Fonts ({heading_font} for headings, {body_font} for body). Rich color palette matching a Scandinavian coffee brand — deep espresso browns, warm creams, muted sage greens, and golden amber accents. Use CSS custom properties for theming. When switching to Swedish, subtly shift the color palette to cooler Nordic tones (slate blue accents, softer whites)."
+        Params:
+            heading_font: String = "Playfair Display"
+            body_font: String = "Inter"
+    }
+
+    glassmorphism_layout[/"Glassmorphism Layout"/]@{
+        text: "LAYOUT: Fixed glassmorphism navbar with backdrop-filter blur. Full-viewport hero with parallax scrolling effect. Menu section as a CSS Grid with hover card animations. About section with a split layout. Contact form with floating labels. Sticky footer with {footer_text}."
+        Params:
+            footer_text: String = "Made with love by PACT"
+    }
+
+    scroll_animations[/"Scroll Animations"/]@{
+        text: "ANIMATIONS: Use CSS @keyframes and IntersectionObserver for scroll-triggered fade-in-up animations on every section. Hero title should have a typewriter reveal effect. Menu cards should stagger their entrance. Smooth parallax on scroll. Language toggle should animate with a slide transition — cross-fade the content."
+    }
+
+    bilingual_toggle[/"Bilingual Toggle"/]@{
+        text: "LANGUAGE TOGGLE: Prominent {lang_a}/{lang_b} pill toggle in the navbar. Use data-{lang_a} and data-{lang_b} attributes. When switching languages, cross-fade all text with a 300ms opacity transition. Shift accent colors to Nordic palette in {lang_b} mode."
+        Params:
+            lang_a: String = "en"
+            lang_b: String = "sv"
+    }
+
+    %% ── Agents ──────────────────────────────────────────────────────
+    %% Shape: subgraph
+    %% Each agent is a container holding its tools.
+    %% Agent metadata: permits, model, prompt, memory.
+    %% Tools inside use squareRect shape with their own @{} metadata.
+
+    subgraph researcher["@researcher"]@{
+        permits: [netRead, llmQuery]
+        prompt: "You are a market research specialist and copywriter. When given a tool result, use the information to produce real output — never describe what you did, just deliver the content. When writing copy, write the actual words that will appear on the website. Be creative, specific, and evocative. Reference the local area by name."
+    }
+
+        research_location["Research Location"]@{
+            description: "Research a city or location to gather useful local context for a business: culture, demographics, popular neighborhoods, local competitors, weather, and tips. Return a concise research brief."
+            requires: [netRead]
+            source: search.duckduckgo(query)
+            Params:
+                query: String
+            Returns: String
+        }
+
+        write_copy["Write Copy"]@{
+            description: "Write vivid, evocative marketing copy for a coffee shop website. Reference the local area by name. Make it feel real and alive."
+            requires: [llmQuery]
+            output: website_copy
+            Params:
+                brief: String
+            Returns: String
+        }
+
+    end
+
+    subgraph translator["@translator"]@{
+        permits: [llmQuery]
+        prompt: "You are a native Swedish translator specializing in marketing and hospitality. When you receive English copy, immediately translate it. Never describe what you are doing — just output the bilingual content in the exact format requested by the tool. Use du-form. Adapt idioms naturally."
+    }
+
+        translate_to_swedish["Translate to Swedish"]@{
+            description: "Translate marketing copy with warmth. Adapt idioms naturally. Use du-form. Keep section labels like HERO_TAGLINE, MENU_ITEM_1 etc unchanged — only translate the actual copy text."
+            requires: [llmQuery]
+            output: bilingual
+            Params:
+                english_copy: String
+            Returns: String
+        }
+
+    end
+
+    subgraph designer["@designer"]@{
+        permits: [llmQuery]
+        prompt: "You are a senior frontend developer and UI designer at a top creative agency. You obsess over typography, whitespace, micro-interactions, and visual hierarchy. Your websites win Awwwards. You write production-quality HTML/CSS/JS with no shortcuts. You use modern CSS (grid, custom properties, clamp(), backdrop-filter, scroll-behavior). You implement smooth scroll-triggered animations with IntersectionObserver. You never use placeholder images — instead you create beautiful SVG illustrations or CSS art. Your designs feel premium, editorial, and alive. Never output markdown — only raw HTML."
+    }
+
+        generate_html["Generate HTML"]@{
+            description: "Generate a complete one-page HTML website with inline CSS and JS. You receive bilingual copy (English + Swedish). Build a world-class bilingual site. Return ONLY raw HTML starting with DOCTYPE. No markdown fences. No explanations."
+            requires: [llmQuery]
+            directives: [scandinavian_design, glassmorphism_layout, scroll_animations, bilingual_toggle]
+            Params:
+                content: String
+            Returns: String
+        }
+
+    end
+
+    %% ── Agent Bundle ────────────────────────────────────────────────
+    %% Nested subgraph wrapping multiple agents into a team.
+
+    subgraph website_team["@website_team"]@{
+        type: bundle
+    }
+        researcher
+        translator
+        designer
+    end
+
+    %% ── Flow ────────────────────────────────────────────────────────
+    %% Shape: lean-right (asymmetric) | Execution entry point.
+    %% The flow defines the orchestration sequence.
+
+    build_bilingual_site>"build_bilingual_site"]@{
+        Params:
+            request: String
+        Returns: String
+    }
+
+    %% ── Flow Edges ──────────────────────────────────────────────────
+    %% Solid arrows: execution dispatch  (PACT ->)
+    %% Edge labels carry the variable binding from each step.
+    %%
+    %% Step 1: research   = @researcher -> #research_location(request)
+    %% Step 2: english    = @researcher -> #write_copy(research)
+    %% Step 3: swedish    = @translator -> #translate_to_swedish(english)
+    %% Step 4: html       = @designer   -> #generate_html(swedish)
+
+    build_bilingual_site -->|"request"| research_location
+    research_location -->|"research"| write_copy
+    write_copy -->|"english_copy"| translate_to_swedish
+    translate_to_swedish -->|"swedish_copy"| generate_html
+    generate_html -->|"return html"| build_bilingual_site
+
+    %% ── Reference Edges ─────────────────────────────────────────────
+    %% Dashed arrows: structural references (tool → template, tool → directive)
+
+    write_copy -.-|"output"| website_copy
+    translate_to_swedish -.-|"output"| bilingual
+
+    generate_html -.-|"directive"| scandinavian_design
+    generate_html -.-|"directive"| glassmorphism_layout
+    generate_html -.-|"directive"| scroll_animations
+    generate_html -.-|"directive"| bilingual_toggle

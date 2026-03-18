@@ -6,7 +6,7 @@
 //!
 //! The [`Dispatcher`] trait defines how `@agent -> #tool(args)` is executed.
 //! The default [`MockDispatcher`] prints calls and returns deterministic
-//! results. The `pact-dispatch` crate provides a [`ClaudeDispatcher`] that
+//! results. The `pact-dispatch` crate provides a `ClaudeDispatcher` that
 //! calls the real Anthropic Messages API.
 
 use super::value::Value;

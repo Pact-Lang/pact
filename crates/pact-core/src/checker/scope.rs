@@ -13,22 +13,34 @@ use std::collections::{HashMap, HashSet};
 /// Information about a declared symbol.
 #[derive(Debug, Clone)]
 pub enum SymbolKind {
+    /// An agent declaration with its granted permissions and available tools.
     Agent {
+        /// Permission paths granted to this agent (each path is a list of segments).
         permits: Vec<Vec<String>>,
+        /// Tool names available to this agent.
         tools: Vec<String>,
     },
+    /// A named group of agents.
     AgentBundle {
+        /// Agent names belonging to this bundle.
         agents: Vec<String>,
     },
+    /// A flow (function-like) declaration.
     Flow {
+        /// Number of parameters the flow accepts.
         param_count: usize,
     },
+    /// A user-defined schema (record type).
     Schema {
+        /// Pairs of (field name, type name).
         fields: Vec<(String, String)>,
     },
+    /// A type alias with enumerated string variants.
     TypeAlias {
+        /// The allowed variant names.
         variants: Vec<String>,
     },
+    /// A tool declaration with permissions, parameters, and return type.
     Tool {
         /// Permission paths required by this tool.
         requires: Vec<Vec<String>>,
@@ -37,6 +49,7 @@ pub enum SymbolKind {
         /// Return type name.
         return_type: Option<String>,
     },
+    /// A reusable skill composed of tools, parameters, and a return type.
     Skill {
         /// Tools this skill uses.
         tools: Vec<String>,
@@ -45,13 +58,20 @@ pub enum SymbolKind {
         /// Return type name.
         return_type: Option<String>,
     },
+    /// A structured output template declaration.
     Template {
         /// Entry names defined in this template.
         entries: Vec<String>,
     },
+    /// A directive declaration that parameterizes tool behavior.
     Directive {
         /// Parameter names defined in this directive.
         params: Vec<String>,
+    },
+    /// An MCP server connection.
+    McpServer {
+        /// Logical name of the MCP server.
+        name: String,
     },
 }
 

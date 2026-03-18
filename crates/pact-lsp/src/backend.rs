@@ -18,6 +18,8 @@ use pact_core::lexer::{LexError, Lexer};
 use pact_core::parser::{ParseError, Parser};
 use pact_core::span::SourceId;
 
+use crate::symbol_index::SymbolIndex;
+
 /// The PACT language server backend.
 pub struct PactBackend {
     client: Client,
@@ -55,6 +57,8 @@ impl LanguageServer for PactBackend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
             ..Default::default()
@@ -318,6 +322,71 @@ impl LanguageServer for PactBackend {
             range: None,
         }))
     }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+
+        let text = match self.documents.get(uri) {
+            Some(t) => t.clone(),
+            None => return Ok(None),
+        };
+
+        let offset = position_to_offset(&text, position);
+        let index = build_symbol_index(&text);
+
+        let def = match index.definition_at(offset) {
+            Some(d) => d,
+            None => return Ok(None),
+        };
+
+        let range = Range::new(
+            offset_to_position(&text, def.location.start),
+            offset_to_position(&text, def.location.end),
+        );
+
+        Ok(Some(GotoDefinitionResponse::Scalar(
+            tower_lsp::lsp_types::Location {
+                uri: uri.clone(),
+                range,
+            },
+        )))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+
+        let text = match self.documents.get(uri) {
+            Some(t) => t.clone(),
+            None => return Ok(None),
+        };
+
+        let offset = position_to_offset(&text, position);
+        let index = build_symbol_index(&text);
+        let include_definition = params.context.include_declaration;
+        let locations = index.references_at(offset, include_definition);
+
+        if locations.is_empty() {
+            return Ok(None);
+        }
+
+        let lsp_locations: Vec<tower_lsp::lsp_types::Location> = locations
+            .iter()
+            .map(|loc| tower_lsp::lsp_types::Location {
+                uri: uri.clone(),
+                range: Range::new(
+                    offset_to_position(&text, loc.start),
+                    offset_to_position(&text, loc.end),
+                ),
+            })
+            .collect();
+
+        Ok(Some(lsp_locations))
+    }
 }
 
 impl PactBackend {
@@ -411,6 +480,8 @@ fn check_error_span(err: &CheckError) -> miette::SourceSpan {
         CheckError::SourceArgNotAParam { span, .. } => *span,
         CheckError::UnknownTemplate { span, .. } => *span,
         CheckError::UnknownDirective { span, .. } => *span,
+        CheckError::UnknownMcpServer { span, .. } => *span,
+        CheckError::InvalidMcpTransport { span, .. } => *span,
     }
 }
 
@@ -462,6 +533,22 @@ pub(crate) fn diagnose(text: &str) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+// ── Symbol index helper ───────────────────────────────────────────────
+
+/// Parse a document and build a [`SymbolIndex`] from the resulting AST.
+///
+/// Returns a default (empty) index if lexing fails.
+fn build_symbol_index(text: &str) -> SymbolIndex {
+    let source_id = SourceId(0);
+    let tokens = match Lexer::new(text, source_id).lex() {
+        Ok(t) => t,
+        Err(_) => return SymbolIndex::default(),
+    };
+    let mut parser = Parser::new(&tokens);
+    let (program, _) = parser.parse_collecting_errors();
+    SymbolIndex::build(&program)
 }
 
 // ── Completion helpers ────────────────────────────────────────────────
@@ -753,6 +840,10 @@ fn find_hover_info(text: &str, offset: usize) -> Option<String> {
             }
             DeclKind::Import(i) => {
                 return Some(format!("**import** `\"{}\"`", i.path));
+            }
+            DeclKind::Connect(c) => {
+                let names: Vec<_> = c.servers.iter().map(|s| s.name.as_str()).collect();
+                return Some(format!("**connect** — MCP servers: {}", names.join(", ")));
             }
         }
     }

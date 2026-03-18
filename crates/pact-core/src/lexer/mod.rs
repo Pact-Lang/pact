@@ -19,7 +19,9 @@
 //! let tokens = Lexer::new(sm.text(id), id).lex().unwrap();
 //! ```
 
+/// Cursor utilities for character-by-character source traversal.
 pub mod cursor;
+/// Token types and token-kind enumeration.
 pub mod token;
 
 use crate::span::{SourceId, Span};
@@ -32,27 +34,36 @@ use thiserror::Error;
 /// Error produced during lexing.
 #[derive(Debug, Error, Diagnostic, Clone)]
 pub enum LexError {
+    /// An unexpected character was encountered.
     #[error("unexpected character '{ch}'")]
     UnexpectedChar {
+        /// The character that was not recognized.
         ch: char,
+        /// Location of the unexpected character.
         #[label("here")]
         span: miette::SourceSpan,
     },
 
+    /// A string literal was opened but never closed.
     #[error("unterminated string literal")]
     UnterminatedString {
+        /// Location where the string begins.
         #[label("string starts here")]
         span: miette::SourceSpan,
     },
 
+    /// A prompt literal `<<...>>` was opened but never closed.
     #[error("unterminated prompt literal `<<...>>`")]
     UnterminatedPrompt {
+        /// Location where the prompt begins.
         #[label("prompt starts here")]
         span: miette::SourceSpan,
     },
 
+    /// A numeric literal could not be parsed.
     #[error("invalid number literal")]
     InvalidNumber {
+        /// Location of the invalid number.
         #[label("here")]
         span: miette::SourceSpan,
     },
@@ -380,6 +391,7 @@ impl<'src> Lexer<'src> {
             "run" => TokenKind::Run,
             "validate" => TokenKind::Validate,
             "cache" => TokenKind::Cache,
+            "connect" => TokenKind::Connect,
             _ => TokenKind::Ident(text.to_string()),
         };
 
@@ -612,6 +624,21 @@ mod tests {
         assert_eq!(
             kinds,
             vec![TokenKind::Skill, TokenKind::Skills, TokenKind::Strategy]
+        );
+    }
+
+    #[test]
+    fn connect_keyword() {
+        let kinds = lex_kinds(r#"connect { slack "stdio cmd" }"#);
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Connect,
+                TokenKind::LBrace,
+                TokenKind::Ident("slack".into()),
+                TokenKind::StringLit("stdio cmd".into()),
+                TokenKind::RBrace,
+            ]
         );
     }
 }

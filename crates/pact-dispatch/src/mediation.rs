@@ -28,38 +28,61 @@ use crate::types::ContentBlock;
 pub enum MediationError {
     /// Claude called a tool not in the agent's tool list.
     UnauthorizedTool {
+        /// Name of the tool that was called.
         tool_name: String,
+        /// Name of the agent that made the call.
         agent_name: String,
+        /// Tools the agent is authorized to use.
         allowed_tools: Vec<String>,
     },
     /// The agent lacks a permission required by the tool.
     MissingPermission {
+        /// Name of the tool that requires the permission.
         tool_name: String,
+        /// The missing permission (dot-separated, e.g. `"net.read"`).
         permission: String,
+        /// Name of the agent lacking the permission.
         agent_name: String,
     },
     /// A tool call input doesn't match the declared parameter type.
     InvalidToolInput {
+        /// Name of the tool receiving invalid input.
         tool_name: String,
+        /// Parameter that failed type validation.
         param: String,
+        /// Expected PACT type name.
         expected: String,
+        /// Actual JSON type name received.
         got: String,
     },
     /// The conversation loop exceeded the max iterations.
-    MaxIterationsExceeded { count: usize },
+    MaxIterationsExceeded {
+        /// Number of iterations reached.
+        count: usize,
+    },
     /// The agent's output contains sensitive data it shouldn't have.
     SensitiveDataLeak {
+        /// Name of the agent that leaked data.
         agent_name: String,
+        /// Category of sensitive data detected.
         pattern: String,
+        /// Human-readable description of the leak.
         detail: String,
     },
     /// The agent's output is empty when a return type was expected.
     EmptyOutput {
+        /// Name of the agent that produced empty output.
         agent_name: String,
+        /// The declared return type that was expected.
         expected_type: String,
     },
     /// The agent acted outside its declared scope.
-    ScopeViolation { agent_name: String, detail: String },
+    ScopeViolation {
+        /// Name of the agent that violated its scope.
+        agent_name: String,
+        /// Description of the violation.
+        detail: String,
+    },
 }
 
 impl std::fmt::Display for MediationError {
@@ -146,6 +169,7 @@ impl std::fmt::Display for MediationError {
 
 /// Runtime compliance mediator for an agent.
 pub struct RuntimeMediator {
+    /// Name of the agent being mediated.
     agent_name: String,
     /// Tools the agent is allowed to use (names without #).
     allowed_tools: Vec<String>,
@@ -354,6 +378,20 @@ impl RuntimeMediator {
 
             // Check handler-based permissions
             if let Some(handler_str) = &tool_decl.handler {
+                // MCP handlers require ^mcp.{server} permission
+                if let Some(rest) = handler_str.strip_prefix("mcp ") {
+                    if let Some((server, _)) = rest.split_once('/') {
+                        let perm = format!("mcp.{}", server);
+                        if !self.permission_granted(&perm) {
+                            return Err(MediationError::MissingPermission {
+                                tool_name: tool_name.to_string(),
+                                permission: perm,
+                                agent_name: self.agent_name.clone(),
+                            });
+                        }
+                    }
+                }
+
                 if let Ok(spec) = parse_handler(handler_str) {
                     let required = handler_required_permissions(&spec);
                     for perm in required {
@@ -454,8 +492,16 @@ fn format_type(ty: &pact_core::ast::types::TypeExpr) -> String {
     }
 }
 
-/// Check if text contains what looks like a credit card number (13-19 consecutive digits).
+/// Check if text contains what looks like a credit card number.
+///
+/// Matches two patterns:
+/// 1. A solid block of 13-19 digits (e.g. `4111111111111111`)
+/// 2. Groups of 4 digits separated by single spaces or dashes (e.g. `4111 1111 1111 1111`)
+///
+/// This avoids false positives from HTML/CSS content where unrelated numbers
+/// (SVG coordinates, animation values, color codes) may appear near each other.
 fn contains_credit_card_pattern(text: &str) -> bool {
+    // Pattern 1: solid block of 13-19 consecutive digits
     let mut consecutive_digits = 0;
     for ch in text.chars() {
         if ch.is_ascii_digit() {
@@ -463,13 +509,48 @@ fn contains_credit_card_pattern(text: &str) -> bool {
             if consecutive_digits >= 13 {
                 return true;
             }
-        } else if ch == ' ' || ch == '-' {
-            // Allow spaces/dashes within card numbers (e.g. "4111 1111 1111 1111")
-            // but don't reset the count
         } else {
             consecutive_digits = 0;
         }
     }
+
+    // Pattern 2: groups of 4 digits separated by spaces/dashes (e.g. "4111 1111 1111 1111")
+    // Use a simple regex-like scan: look for 4digits{sep}4digits{sep}4digits{sep}4digits
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    while i + 18 < len {
+        // Need at least 19 chars for "DDDD DDDD DDDD DDDD"
+        if chars[i].is_ascii_digit()
+            && chars[i + 1].is_ascii_digit()
+            && chars[i + 2].is_ascii_digit()
+            && chars[i + 3].is_ascii_digit()
+            && (chars[i + 4] == ' ' || chars[i + 4] == '-')
+            && chars[i + 5].is_ascii_digit()
+            && chars[i + 6].is_ascii_digit()
+            && chars[i + 7].is_ascii_digit()
+            && chars[i + 8].is_ascii_digit()
+            && (chars[i + 9] == ' ' || chars[i + 9] == '-')
+            && chars[i + 10].is_ascii_digit()
+            && chars[i + 11].is_ascii_digit()
+            && chars[i + 12].is_ascii_digit()
+            && chars[i + 13].is_ascii_digit()
+            && (chars[i + 14] == ' ' || chars[i + 14] == '-')
+            && chars[i + 15].is_ascii_digit()
+            && chars[i + 16].is_ascii_digit()
+            && chars[i + 17].is_ascii_digit()
+            && chars[i + 18].is_ascii_digit()
+        {
+            // Ensure it's not embedded in a longer number or word
+            let before_ok = i == 0 || !chars[i - 1].is_ascii_alphanumeric();
+            let after_ok = i + 19 >= len || !chars[i + 19].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+
     false
 }
 
@@ -865,11 +946,25 @@ mod tests {
 
     #[test]
     fn credit_card_patterns() {
+        // Solid block of digits
         assert!(contains_credit_card_pattern("4111111111111111"));
+        assert!(contains_credit_card_pattern("4111111111111")); // 13 digits
+        // Grouped format: DDDD sep DDDD sep DDDD sep DDDD
         assert!(contains_credit_card_pattern("4111 1111 1111 1111"));
         assert!(contains_credit_card_pattern("4111-1111-1111-1111"));
-        assert!(!contains_credit_card_pattern("12345")); // too short
+        // Too short
+        assert!(!contains_credit_card_pattern("12345"));
         assert!(!contains_credit_card_pattern("hello world"));
+        // HTML/CSS false positives should NOT match
+        assert!(!contains_credit_card_pattern(
+            "translateY(-4px); opacity: 0.95; z-index: 1000; blur(12px)"
+        ));
+        assert!(!contains_credit_card_pattern(
+            "M 100 200 300 400 500 600 700 800"
+        ));
+        assert!(!contains_credit_card_pattern(
+            "grid-template-columns: 1fr 2fr 3fr; padding: 16px 24px 32px 48px;"
+        ));
     }
 
     #[test]
@@ -959,6 +1054,101 @@ mod tests {
             let mediator = RuntimeMediator::new(agent, &program);
             assert!(mediator
                 .validate_handler_permissions("exec_cmd", &program)
+                .is_ok());
+        } else {
+            panic!("expected agent decl");
+        }
+    }
+
+    // ── MCP permission tests ────────────────────────────────
+
+    #[test]
+    fn mcp_handler_without_permission_rejected() {
+        let src = r#"
+            connect {
+                slack "stdio slack-mcp-server"
+            }
+            tool #post {
+                description: <<Post.>>
+                requires: []
+                handler: "mcp slack/send_message"
+                params { text :: String }
+                returns :: String
+            }
+            agent @worker {
+                permits: [^llm.query]
+                tools: [#post]
+            }
+        "#;
+        let program = parse_program(src);
+        if let DeclKind::Agent(agent) = &program.decls[2].kind {
+            let mediator = RuntimeMediator::new(agent, &program);
+            let err = mediator
+                .validate_handler_permissions("post", &program)
+                .unwrap_err();
+            match err {
+                MediationError::MissingPermission { permission, .. } => {
+                    assert_eq!(permission, "mcp.slack");
+                }
+                other => panic!("expected MissingPermission, got {:?}", other),
+            }
+        } else {
+            panic!("expected agent decl");
+        }
+    }
+
+    #[test]
+    fn mcp_handler_with_permission_passes() {
+        let src = r#"
+            connect {
+                slack "stdio slack-mcp-server"
+            }
+            tool #post {
+                description: <<Post.>>
+                requires: []
+                handler: "mcp slack/send_message"
+                params { text :: String }
+                returns :: String
+            }
+            agent @worker {
+                permits: [^mcp.slack, ^llm.query]
+                tools: [#post]
+            }
+        "#;
+        let program = parse_program(src);
+        if let DeclKind::Agent(agent) = &program.decls[2].kind {
+            let mediator = RuntimeMediator::new(agent, &program);
+            assert!(mediator
+                .validate_handler_permissions("post", &program)
+                .is_ok());
+        } else {
+            panic!("expected agent decl");
+        }
+    }
+
+    #[test]
+    fn mcp_parent_permission_covers_server() {
+        let src = r#"
+            connect {
+                slack "stdio slack-mcp-server"
+            }
+            tool #post {
+                description: <<Post.>>
+                requires: []
+                handler: "mcp slack/send_message"
+                params { text :: String }
+                returns :: String
+            }
+            agent @worker {
+                permits: [^mcp, ^llm.query]
+                tools: [#post]
+            }
+        "#;
+        let program = parse_program(src);
+        if let DeclKind::Agent(agent) = &program.decls[2].kind {
+            let mediator = RuntimeMediator::new(agent, &program);
+            assert!(mediator
+                .validate_handler_permissions("post", &program)
                 .is_ok());
         } else {
             panic!("expected agent decl");

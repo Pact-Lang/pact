@@ -83,6 +83,7 @@ pub trait Visitor {
                 }
             }
             DeclKind::Import(_) => {}
+            DeclKind::Connect(_) => {}
         }
     }
 

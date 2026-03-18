@@ -14,7 +14,9 @@ use crate::span::Span;
 /// A top-level declaration in a `.pact` file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decl {
+    /// The specific declaration variant.
     pub kind: DeclKind,
+    /// Source span covering the entire declaration.
     pub span: Span,
 }
 
@@ -142,6 +144,16 @@ pub enum DeclKind {
     /// import "path/to/file.pact"
     /// ```
     Import(ImportDecl),
+
+    /// An MCP server connection block.
+    ///
+    /// ```pact
+    /// connect {
+    ///     slack   "stdio slack-mcp-server"
+    ///     github  "sse https://github.internal/mcp"
+    /// }
+    /// ```
+    Connect(ConnectDecl),
 }
 
 /// Directive declaration — reusable prompt block with optional parameters.
@@ -176,6 +188,24 @@ pub struct ImportDecl {
     pub span: Span,
 }
 
+/// A single MCP server connection entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectEntry {
+    /// Logical name for this server (e.g. "slack", "github").
+    pub name: String,
+    /// Transport string: "stdio command..." or "sse url...".
+    pub transport: String,
+    /// Source span of this entry.
+    pub span: Span,
+}
+
+/// MCP server connection block declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectDecl {
+    /// The MCP server entries declared in this block.
+    pub servers: Vec<ConnectEntry>,
+}
+
 /// Template declaration — reusable output format specification.
 /// Referenced by tools via `output: %template_name`.
 #[derive(Debug, Clone, PartialEq)]
@@ -191,20 +221,29 @@ pub struct TemplateDecl {
 pub enum TemplateEntry {
     /// A named field: `FIELD_NAME :: Type <<description>>`
     Field {
+        /// Field identifier.
         name: String,
+        /// Type annotation for the field.
         ty: TypeExpr,
+        /// Optional human-readable description in `<<...>>`.
         description: Option<String>,
     },
     /// A repeated field: `FIELD_NAME :: Type * count <<description>>`
     Repeat {
+        /// Field identifier.
         name: String,
+        /// Type annotation for each repeated element.
         ty: TypeExpr,
+        /// Number of repetitions requested.
         count: usize,
+        /// Optional human-readable description in `<<...>>`.
         description: Option<String>,
     },
     /// A labeled section: `section NAME <<description>>`
     Section {
+        /// Section label.
         name: String,
+        /// Optional human-readable description in `<<...>>`.
         description: Option<String>,
     },
 }
@@ -255,36 +294,47 @@ pub struct FlowDecl {
 /// A parameter with an optional type annotation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
+    /// Parameter name.
     pub name: String,
+    /// Optional type annotation (`:: Type`).
     pub ty: Option<TypeExpr>,
+    /// Source span of the parameter.
     pub span: Span,
 }
 
 /// Schema declaration fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaDecl {
+    /// Schema name.
     pub name: String,
+    /// Fields defined in the schema body.
     pub fields: Vec<SchemaField>,
 }
 
 /// A single field in a schema.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaField {
+    /// Field name.
     pub name: String,
+    /// Type annotation (`:: Type`).
     pub ty: TypeExpr,
+    /// Source span of the field definition.
     pub span: Span,
 }
 
 /// Type alias declaration fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeAliasDecl {
+    /// Alias name.
     pub name: String,
+    /// Union variant names (`A | B | C`).
     pub variants: Vec<String>,
 }
 
 /// Permission tree declaration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PermitTreeDecl {
+    /// Top-level permission nodes in the tree.
     pub nodes: Vec<PermitNode>,
 }
 
@@ -295,6 +345,7 @@ pub struct PermitNode {
     pub path: Vec<String>,
     /// Child permissions.
     pub children: Vec<PermitNode>,
+    /// Source span of this permission node.
     pub span: Span,
 }
 
@@ -337,6 +388,8 @@ pub struct ToolDecl {
     pub validate: Option<String>,
     /// Cache duration string (e.g. "24h", "30m", "7d").
     pub cache: Option<String>,
+    /// MCP import shorthand: (server_name, tool_name) from `tool #name = mcp server/tool`.
+    pub mcp_import: Option<(String, String)>,
 }
 
 /// Skill declaration fields.
@@ -359,12 +412,15 @@ pub struct SkillDecl {
 /// Test declaration fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TestDecl {
+    /// Human-readable test description string.
     pub description: String,
+    /// Body expressions forming the test logic.
     pub body: Vec<Expr>,
 }
 
 /// A complete PACT program (one source file).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
+    /// All top-level declarations in the source file.
     pub decls: Vec<Decl>,
 }

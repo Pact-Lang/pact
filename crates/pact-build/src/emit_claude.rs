@@ -33,26 +33,36 @@ use serde_json::{json, Value as JsonValue};
 /// A Claude-compatible tool definition.
 #[derive(Debug, Clone, Serialize)]
 pub struct ClaudeTool {
+    /// The tool name as declared in PACT.
     pub name: String,
+    /// Human-readable description of what the tool does.
     pub description: String,
+    /// JSON Schema describing the tool's input parameters.
     pub input_schema: JsonValue,
 }
 
 /// A complete Claude API request payload for an agent.
 #[derive(Debug, Clone, Serialize)]
 pub struct ClaudeRequest {
+    /// Claude model identifier (e.g. `"claude-sonnet-4-20250514"`).
     pub model: String,
+    /// Maximum number of tokens to generate.
     pub max_tokens: u32,
+    /// Optional system prompt for the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<String>,
+    /// Tools available to the agent.
     pub tools: Vec<ClaudeTool>,
+    /// Conversation messages (starts with a user message).
     pub messages: Vec<ClaudeMessage>,
 }
 
 /// A message in a Claude conversation.
 #[derive(Debug, Clone, Serialize)]
 pub struct ClaudeMessage {
+    /// Message role (`"user"` or `"assistant"`).
     pub role: String,
+    /// Message content (text or structured content blocks).
     pub content: JsonValue,
 }
 
@@ -71,6 +81,11 @@ pub fn tool_to_claude_with_program(tool: &ToolDecl, program: Option<&Program>) -
         ExprKind::PromptLit(s) | ExprKind::StringLit(s) => s.trim().to_string(),
         _ => String::new(),
     };
+
+    // Handle MCP-imported tools
+    if tool.mcp_import.is_some() && tool.params.is_empty() {
+        description.push_str("\n\n[MCP-imported tool — schema resolved at runtime]");
+    }
 
     if let Some(source) = &tool.source {
         if source.args.is_empty() {

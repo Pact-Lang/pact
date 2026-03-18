@@ -261,6 +261,10 @@ fn handle_list(args: &Value) -> Result<String, String> {
             DeclKind::Import(i) => {
                 lines.push(format!("import \"{}\"", i.path));
             }
+            DeclKind::Connect(c) => {
+                let names: Vec<_> = c.servers.iter().map(|s| s.name.as_str()).collect();
+                lines.push(format!("connect — MCP servers: {}", names.join(", ")));
+            }
         }
     }
 

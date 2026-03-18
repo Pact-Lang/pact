@@ -44,7 +44,7 @@ impl ToolCache {
 
     /// Get a cached value if it exists and hasn't expired.
     pub fn get(&self, key: &str) -> Option<String> {
-        let entries = self.entries.lock().unwrap();
+        let entries = self.entries.lock().ok()?;
         if let Some(entry) = entries.get(key) {
             if Instant::now() < entry.expires_at {
                 return Some(entry.value.clone());
@@ -54,21 +54,28 @@ impl ToolCache {
     }
 
     /// Store a value in the cache with a time-to-live duration.
+    ///
+    /// Silently fails if the lock is poisoned (another thread panicked
+    /// while holding it). This is acceptable because caching is best-effort.
     pub fn set(&self, key: String, value: String, ttl: Duration) {
-        let mut entries = self.entries.lock().unwrap();
-        entries.insert(
-            key,
-            CacheEntry {
-                value,
-                expires_at: Instant::now() + ttl,
-            },
-        );
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.insert(
+                key,
+                CacheEntry {
+                    value,
+                    expires_at: Instant::now() + ttl,
+                },
+            );
+        }
     }
 
     /// Clear all entries from the cache.
+    ///
+    /// Silently fails if the lock is poisoned.
     pub fn clear(&self) {
-        let mut entries = self.entries.lock().unwrap();
-        entries.clear();
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.clear();
+        }
     }
 }
 

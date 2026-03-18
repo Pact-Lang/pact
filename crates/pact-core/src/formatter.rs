@@ -116,6 +116,19 @@ impl Formatter {
             DeclKind::Import(d) => {
                 self.push_line(&format!("import \"{}\"", d.path));
             }
+            DeclKind::Connect(c) => {
+                self.push_line("connect {");
+                self.indent();
+                for entry in &c.servers {
+                    self.push_indent();
+                    self.buf.push_str(&format!(
+                        "{} \"{}\"\n",
+                        entry.name, entry.transport
+                    ));
+                }
+                self.dedent();
+                self.push_line("}");
+            }
         }
     }
 

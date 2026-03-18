@@ -16,11 +16,17 @@ use serde_json::Value as JsonValue;
 /// Top-level response from the Anthropic Messages API.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MessagesResponse {
+    /// Unique message identifier.
     pub id: String,
+    /// Model that generated the response.
     pub model: String,
+    /// Role of the message author (always `"assistant"`).
     pub role: String,
+    /// Content blocks in the response.
     pub content: Vec<ContentBlock>,
+    /// Reason the model stopped generating.
     pub stop_reason: StopReason,
+    /// Token usage statistics.
     pub usage: Usage,
 }
 
@@ -28,9 +34,13 @@ pub struct MessagesResponse {
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
+    /// The model finished its turn naturally.
     EndTurn,
+    /// The model is requesting a tool call.
     ToolUse,
+    /// The response was truncated due to the token limit.
     MaxTokens,
+    /// A custom stop sequence was encountered.
     StopSequence,
 }
 
@@ -38,12 +48,20 @@ pub enum StopReason {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentBlock {
+    /// A plain text block.
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        /// The text content.
+        text: String,
+    },
+    /// A tool invocation request from the model.
     #[serde(rename = "tool_use")]
     ToolUse {
+        /// Unique identifier for this tool use.
         id: String,
+        /// Name of the tool to call.
         name: String,
+        /// JSON arguments for the tool.
         input: JsonValue,
     },
 }
@@ -51,7 +69,9 @@ pub enum ContentBlock {
 /// Token usage information.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Usage {
+    /// Number of tokens in the request.
     pub input_tokens: u32,
+    /// Number of tokens in the response.
     pub output_tokens: u32,
 }
 
@@ -60,10 +80,14 @@ pub struct Usage {
 /// A tool result to send back to Claude after executing a tool.
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolResultContent {
+    /// Content type discriminator (always `"tool_result"`).
     #[serde(rename = "type")]
     pub content_type: String,
+    /// Identifier of the tool use this result responds to.
     pub tool_use_id: String,
+    /// The result payload or error message.
     pub content: String,
+    /// If `Some(true)`, indicates the tool execution failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }

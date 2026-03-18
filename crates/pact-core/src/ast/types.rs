@@ -12,7 +12,9 @@ use crate::span::Span;
 /// A type expression in the PACT language.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeExpr {
+    /// The kind of type expression.
     pub kind: TypeExprKind,
+    /// Source location of this type expression.
     pub span: Span,
 }
 
@@ -23,7 +25,12 @@ pub enum TypeExprKind {
     Named(String),
 
     /// A generic type, e.g. `List<String>`, `Map<String, Int>`.
-    Generic { name: String, args: Vec<TypeExpr> },
+    Generic {
+        /// The generic type name.
+        name: String,
+        /// The type arguments.
+        args: Vec<TypeExpr>,
+    },
 
     /// An optional type, e.g. `String?`.
     Optional(Box<TypeExpr>),

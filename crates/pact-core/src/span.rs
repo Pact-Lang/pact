@@ -13,13 +13,19 @@ use std::collections::HashMap;
 
 /// An opaque identifier for a source file loaded into the [`SourceMap`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SourceId(pub u32);
+pub struct SourceId(
+    /// Numeric index into the source map.
+    pub u32,
+);
 
 /// A half-open byte range `[start, end)` inside a single source file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
+    /// The source file this span belongs to.
     pub source: SourceId,
+    /// Byte offset of the first character (inclusive).
     pub start: usize,
+    /// Byte offset past the last character (exclusive).
     pub end: usize,
 }
 

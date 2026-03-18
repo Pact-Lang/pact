@@ -9,19 +9,24 @@
 //! 2. If `stop_reason: tool_use` → validate, execute, feed results back
 //! 3. Repeat until `stop_reason: end_turn` or max iterations reached
 
+use std::sync::Arc;
+
 use pact_build::emit_claude::{build_agent_request, ClaudeMessage};
 use pact_build::emit_markdown::generate_agent_prompt;
 use pact_core::ast::stmt::{AgentDecl, Program};
 use pact_core::interpreter::value::Value;
 use serde_json::json;
+use tracing::{debug, info, info_span, warn, Instrument};
 
 use pact_core::ast::stmt::{DeclKind, TemplateEntry};
 
 use crate::cache::{global_cache, parse_duration};
 use crate::client::AnthropicClient;
 use crate::convert::format_tool_call_message;
-use crate::executor::{execute_handler, extract_params, parse_handler};
+use crate::executor::{execute_handler, extract_params, parse_handler, HandlerSpec};
+use crate::mcp_client::McpConnectionPool;
 use crate::mediation::{find_tool_decl, MediationError, RuntimeMediator};
+use crate::rate_limit::RateLimiter;
 use crate::types::{ContentBlock, StopReason, ToolResultContent};
 use crate::DispatchError;
 
@@ -32,6 +37,8 @@ const DEFAULT_MAX_ITERATIONS: usize = 10;
 pub struct ToolUseLoop {
     client: AnthropicClient,
     max_iterations: usize,
+    mcp_pool: Option<McpConnectionPool>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl ToolUseLoop {
@@ -40,12 +47,29 @@ impl ToolUseLoop {
         Self {
             client,
             max_iterations: DEFAULT_MAX_ITERATIONS,
+            mcp_pool: None,
+            rate_limiter: None,
         }
+    }
+
+    /// Set the MCP connection pool from a program's connect block(s).
+    pub fn with_mcp_pool(mut self, program: &Program) -> Self {
+        let pool = McpConnectionPool::from_program(program);
+        if !pool.is_empty() {
+            self.mcp_pool = Some(pool);
+        }
+        self
     }
 
     /// Set the maximum number of iterations.
     pub fn with_max_iterations(mut self, max: usize) -> Self {
         self.max_iterations = max;
+        self
+    }
+
+    /// Set the rate limiter.
+    pub fn with_rate_limiter(mut self, limiter: Arc<RateLimiter>) -> Self {
+        self.rate_limiter = Some(limiter);
         self
     }
 
@@ -60,7 +84,30 @@ impl ToolUseLoop {
         tool_name: &str,
         args: &[Value],
     ) -> Result<Value, DispatchError> {
+        let span = info_span!("dispatch", agent = agent.name, tool = tool_name);
+        self.dispatch_inner(agent, program, tool_name, args)
+            .instrument(span)
+            .await
+    }
+
+    async fn dispatch_inner(
+        &self,
+        agent: &AgentDecl,
+        program: &Program,
+        tool_name: &str,
+        args: &[Value],
+    ) -> Result<Value, DispatchError> {
         let mediator = RuntimeMediator::new(agent, program);
+
+        // Check rate limits before dispatching
+        if let Some(limiter) = &self.rate_limiter {
+            limiter
+                .check_agent_limit(&agent.name)
+                .map_err(DispatchError::RateLimit)?;
+            limiter
+                .check_global_limit()
+                .map_err(DispatchError::RateLimit)?;
+        }
 
         // Build the initial request using the build pipeline
         let user_message = format_tool_call_message(tool_name, args);
@@ -81,20 +128,38 @@ impl ToolUseLoop {
                 ));
             }
 
-            println!(
-                "[DISPATCH @{}] iteration {}/{}",
-                agent.name, iteration, self.max_iterations
+            info!(
+                agent = agent.name,
+                iteration,
+                max = self.max_iterations,
+                "loop iteration"
             );
 
-            // Send request to Claude
-            let response = self.client.send_message(&request).await?;
+            // Send request to Claude, with graceful shutdown on Ctrl+C
+            let response = tokio::select! {
+                result = self.client.send_message(&request) => result?,
+                _ = tokio::signal::ctrl_c() => {
+                    warn!(agent = agent.name, "interrupted by signal, shutting down gracefully");
+                    return Err(DispatchError::ExecutionError(
+                        "dispatch interrupted by shutdown signal".to_string()
+                    ));
+                }
+            };
 
-            println!(
-                "[DISPATCH @{}] stop_reason: {:?}, tokens: {}+{}",
-                agent.name,
-                response.stop_reason,
-                response.usage.input_tokens,
-                response.usage.output_tokens
+            // Record the API call and tokens
+            if let Some(limiter) = &self.rate_limiter {
+                limiter.record_agent_call(&agent.name);
+                let tokens =
+                    (response.usage.input_tokens + response.usage.output_tokens) as u64;
+                limiter.record_flow_tokens(tool_name, tokens);
+            }
+
+            info!(
+                agent = agent.name,
+                stop_reason = ?response.stop_reason,
+                input_tokens = response.usage.input_tokens,
+                output_tokens = response.usage.output_tokens,
+                "response received"
             );
 
             match response.stop_reason {
@@ -124,7 +189,7 @@ impl ToolUseLoop {
                         }
                     }
 
-                    println!("[DISPATCH @{}] => completed (output validated)", agent.name);
+                    info!(agent = agent.name, "completed (output validated)");
                     return Ok(Value::ToolResult(text));
                 }
 
@@ -182,12 +247,15 @@ impl ToolUseLoop {
 
                     for tool_use in &tool_uses {
                         if let ContentBlock::ToolUse { id, name, input } = tool_use {
-                            println!("[DISPATCH @{}] executing #{}({})", agent.name, name, input);
+                            info!(agent = agent.name, tool = name.as_str(), "executing tool");
 
                             let result = execute_tool(name, input, program).await?;
 
                             let tool_result = ToolResultContent::success(id, &result);
-                            tool_results.push(serde_json::to_value(&tool_result).unwrap());
+                            tool_results.push(
+                                serde_json::to_value(&tool_result)
+                                    .map_err(|e| DispatchError::ParseError(e.to_string()))?,
+                            );
                         }
                     }
 
@@ -210,7 +278,7 @@ impl ToolUseLoop {
                         .collect::<Vec<_>>()
                         .join("");
                     if !text.is_empty() {
-                        eprintln!("[DISPATCH {}] warning: response truncated at max_tokens, using partial output", agent.name);
+                        warn!(agent = agent.name, "response truncated at max_tokens, using partial output");
                         return Ok(Value::ToolResult(text));
                     }
                     return Err(DispatchError::MaxTokens);
@@ -258,7 +326,7 @@ async fn execute_tool(
         if let Some(cache_str) = &td.cache {
             let cache_key = format!("{}:{}", tool_name, input);
             if let Some(cached) = global_cache().get(&cache_key) {
-                println!("[DISPATCH] #{tool_name} cache hit");
+                debug!(tool = tool_name, "cache hit");
                 return Ok(cached);
             }
 
@@ -285,7 +353,7 @@ async fn execute_tool_with_retry(
     let mut last_error = None;
     for attempt in 0..=max_retries {
         if attempt > 0 {
-            println!("[DISPATCH] #{tool_name} retry {attempt}/{max_retries}");
+            info!(tool = tool_name, attempt, max_retries, "retry");
             // Brief delay before retry with exponential backoff
             tokio::time::sleep(tokio::time::Duration::from_millis(
                 500 * (attempt as u64 + 1),
@@ -305,7 +373,7 @@ async fn execute_tool_with_retry(
 /// Execute a tool once, using its handler if declared, or falling back to simulation.
 ///
 /// When a tool has a `handler:` field, the handler is parsed and executed for real
-/// (HTTP request, shell command, or builtin function). Otherwise, a simulated
+/// (HTTP request, shell command, MCP call, or builtin function). Otherwise, a simulated
 /// result is returned so Claude can continue reasoning.
 async fn execute_tool_once(
     tool_name: &str,
@@ -316,10 +384,7 @@ async fn execute_tool_once(
     if let Some(tool_decl) = find_tool_decl(program, tool_name) {
         // Check for source-based execution first (built-in providers)
         if let Some(source) = &tool_decl.source {
-            println!(
-                "[DISPATCH] #{tool_name} using provider: !{}",
-                source.capability
-            );
+            debug!(tool = tool_name, provider = source.capability.as_str(), "using provider");
             let params = extract_params(input);
             return crate::providers::execute_provider(&source.capability, &params).await;
         }
@@ -327,8 +392,16 @@ async fn execute_tool_once(
         // Fall back to handler-based execution
         if let Some(handler_str) = &tool_decl.handler {
             let spec = parse_handler(handler_str)?;
+
+            // MCP handlers are routed through the connection pool
+            if let HandlerSpec::Mcp { server, tool } = &spec {
+                debug!(tool_name, mcp_server = server.as_str(), mcp_tool = tool.as_str(), "via MCP");
+                let pool = McpConnectionPool::from_program(program);
+                return pool.call_tool(server, tool, input.clone()).await;
+            }
+
             let params = extract_params(input);
-            println!("[DISPATCH] #{tool_name} has handler: {handler_str}");
+            debug!(tool = tool_name, handler = handler_str, "executing handler");
             return execute_handler(&spec, &params).await;
         }
     }
