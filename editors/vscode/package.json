@@ -50,7 +50,7 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/node": "^25.4.0",
+    "@types/node": "^25.5.0",
     "@types/vscode": "^1.75.0",
     "@vscode/vsce": "^2.0.0",
     "esbuild": "^0.20.0",
