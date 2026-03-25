@@ -1206,9 +1206,9 @@ mod tests {
         "#;
         let errors = check_src(src);
         assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, CheckError::DuplicateDefinition { name, .. } if name == "cache")),
+            errors.iter().any(
+                |e| matches!(e, CheckError::DuplicateDefinition { name, .. } if name == "cache")
+            ),
             "expected duplicate definition error for lesson 'cache'"
         );
     }

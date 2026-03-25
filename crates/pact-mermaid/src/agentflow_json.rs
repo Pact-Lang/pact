@@ -171,12 +171,18 @@ mod tests {
     fn edge_stroke_json_roundtrip() {
         let mut g = AgentFlowGraph::new("TB");
         g.edges.push(AgentFlowEdge {
-            from: "a".into(), to: "b".into(), label: None,
-            edge_type: EdgeType::Flow, stroke: EdgeStroke::Thick,
+            from: "a".into(),
+            to: "b".into(),
+            label: None,
+            edge_type: EdgeType::Flow,
+            stroke: EdgeStroke::Thick,
         });
         g.edges.push(AgentFlowEdge {
-            from: "c".into(), to: "d".into(), label: None,
-            edge_type: EdgeType::Reference, stroke: EdgeStroke::Dotted,
+            from: "c".into(),
+            to: "d".into(),
+            label: None,
+            edge_type: EdgeType::Reference,
+            stroke: EdgeStroke::Dotted,
         });
         let json_str = agentflow_to_json_string(&g);
         let back = parse_agentflow_json(&json_str).unwrap();

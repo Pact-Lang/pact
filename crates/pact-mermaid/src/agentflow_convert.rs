@@ -190,11 +190,7 @@ fn emit_type_decl(ty: &AgentFlowTypeDecl, out: &mut String) {
             // Check if it looks like a union type (contains |).
             if target.contains('|') {
                 let variants: Vec<&str> = target.split('|').map(|s| s.trim()).collect();
-                out.push_str(&format!(
-                    "type {} = {}\n",
-                    ty.name,
-                    variants.join(" | ")
-                ));
+                out.push_str(&format!("type {} = {}\n", ty.name, variants.join(" | ")));
             } else {
                 out.push_str(&format!("type {} = {}\n", ty.name, target));
             }
@@ -271,7 +267,10 @@ fn emit_tool(tool: &AgentFlowToolNode, out: &mut String) {
     let name = to_snake_case(&tool.id);
     out.push_str(&format!("tool #{} {{\n", name));
     if !tool.metadata.description.is_empty() {
-        out.push_str(&format!("    description: <<{}>>\n", tool.metadata.description));
+        out.push_str(&format!(
+            "    description: <<{}>>\n",
+            tool.metadata.description
+        ));
     }
 
     if !tool.metadata.requires.is_empty() {
@@ -511,10 +510,7 @@ fn emit_named_flow(flow: &AgentFlowDef, _graph: &AgentFlowGraph, out: &mut Strin
         params.join(", ")
     };
 
-    let returns = flow
-        .returns
-        .as_deref()
-        .unwrap_or("String");
+    let returns = flow.returns.as_deref().unwrap_or("String");
 
     out.push_str(&format!(
         "flow {}({}) -> {} {{\n",
@@ -534,7 +530,10 @@ fn emit_named_flow(flow: &AgentFlowDef, _graph: &AgentFlowGraph, out: &mut Strin
 
         out.push_str(&format!(
             "    {} = @{} -> #{}({})\n",
-            step.output_var, step.agent, to_snake_case(&step.tool), args
+            step.output_var,
+            step.agent,
+            to_snake_case(&step.tool),
+            args
         ));
     }
 
@@ -572,10 +571,7 @@ fn emit_flow_from_edges(flow_edges: &[&AgentFlowEdge], graph: &AgentFlowGraph, o
                 step_var, agent_id, to_name, prev
             ));
         } else {
-            out.push_str(&format!(
-                "    {} = #{}({})\n",
-                step_var, to_name, prev
-            ));
+            out.push_str(&format!("    {} = #{}({})\n", step_var, to_name, prev));
         }
     }
 
@@ -943,21 +939,37 @@ mod tests {
         g.agents.push(AgentFlowAgent {
             id: "coordinator".into(),
             label: "@coordinator".into(),
-            model: None, prompt: None, permits: vec![], memory: vec![],
+            model: None,
+            prompt: None,
+            permits: vec![],
+            memory: vec![],
             nodes: vec![AgentFlowToolNode {
-                id: "plan".into(), label: "Plan".into(), shape: "subroutine".into(),
+                id: "plan".into(),
+                label: "Plan".into(),
+                shape: "subroutine".into(),
                 metadata: ToolMetadata {
-                    description: "Plan".into(), requires: vec![], deny: vec![],
-                    source: None, handler: None, output: None, directives: vec![],
-                    params: BTreeMap::new(), returns: Some("String".into()),
-                    retry: None, cache: None, validate: None,
+                    description: "Plan".into(),
+                    requires: vec![],
+                    deny: vec![],
+                    source: None,
+                    handler: None,
+                    output: None,
+                    directives: vec![],
+                    params: BTreeMap::new(),
+                    returns: Some("String".into()),
+                    retry: None,
+                    cache: None,
+                    validate: None,
                 },
             }],
             skills: vec![],
         });
         g.edges.push(AgentFlowEdge {
-            from: "input".into(), to: "plan".into(), label: None,
-            edge_type: EdgeType::Delegation, stroke: EdgeStroke::Normal,
+            from: "input".into(),
+            to: "plan".into(),
+            label: None,
+            edge_type: EdgeType::Delegation,
+            stroke: EdgeStroke::Normal,
         });
         // Delegation edges aren't Flow, so emit_flow won't include them.
         // Verify no crash and output is valid PACT.
@@ -970,8 +982,11 @@ mod tests {
         // OutputBinding edges (--o) should not appear in the flow body.
         let mut g = AgentFlowGraph::new("TB");
         g.edges.push(AgentFlowEdge {
-            from: "tool_a".into(), to: "doc_out".into(), label: None,
-            edge_type: EdgeType::OutputBinding, stroke: EdgeStroke::Normal,
+            from: "tool_a".into(),
+            to: "doc_out".into(),
+            label: None,
+            edge_type: EdgeType::OutputBinding,
+            stroke: EdgeStroke::Normal,
         });
         let pact = agentflow_graph_to_pact(&g);
         // Should not crash, and should not contain a flow for OutputBinding.

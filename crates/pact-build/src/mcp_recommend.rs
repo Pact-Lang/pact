@@ -224,7 +224,11 @@ pub fn generate_recommendations_md(program: &Program) -> String {
     // Environment variables section (only if any are needed).
     let env_vars: Vec<(&'static str, &'static str)> = recommendations
         .iter()
-        .flat_map(|rec| rec.requires_env.iter().map(move |env| (*env, rec.server_name)))
+        .flat_map(|rec| {
+            rec.requires_env
+                .iter()
+                .map(move |env| (*env, rec.server_name))
+        })
         .collect();
 
     if !env_vars.is_empty() {

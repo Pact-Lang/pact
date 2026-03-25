@@ -154,10 +154,7 @@ async fn provider_fs_glob_pattern() {
     std::fs::write(dir.join("c.log"), "c").unwrap();
 
     let mut params = HashMap::new();
-    params.insert(
-        "pattern".to_string(),
-        format!("{}/*.txt", dir.display()),
-    );
+    params.insert("pattern".to_string(), format!("{}/*.txt", dir.display()));
     let result = execute_provider("fs.glob", &params).await.unwrap();
     let files: Vec<String> = serde_json::from_str(&result).unwrap();
     assert_eq!(files.len(), 2);
@@ -423,10 +420,7 @@ fn cache_ttl_expiry() {
         "temp_value".into(),
         Duration::from_millis(50),
     );
-    assert_eq!(
-        cache.get("ephemeral_key"),
-        Some("temp_value".to_string())
-    );
+    assert_eq!(cache.get("ephemeral_key"), Some("temp_value".to_string()));
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(cache.get("ephemeral_key"), None);
 }
@@ -528,7 +522,10 @@ fn convert_roundtrip_nested_list_in_record() {
     let mut fields = HashMap::new();
     fields.insert(
         "tags".into(),
-        Value::List(vec![Value::String("rust".into()), Value::String("pact".into())]),
+        Value::List(vec![
+            Value::String("rust".into()),
+            Value::String("pact".into()),
+        ]),
     );
     fields.insert("count".into(), Value::Int(2));
     let val = Value::Record(fields);
@@ -561,7 +558,10 @@ async fn error_provider_fs_read_missing_path_param() {
     let params = HashMap::new();
     let err = execute_provider("fs.read", &params).await.unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("path"), "error should mention missing 'path': {msg}");
+    assert!(
+        msg.contains("path"),
+        "error should mention missing 'path': {msg}"
+    );
 }
 
 #[tokio::test]
@@ -569,7 +569,10 @@ async fn error_provider_fs_write_missing_path_param() {
     let params = HashMap::new();
     let err = execute_provider("fs.write", &params).await.unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("path"), "error should mention missing 'path': {msg}");
+    assert!(
+        msg.contains("path"),
+        "error should mention missing 'path': {msg}"
+    );
 }
 
 #[tokio::test]

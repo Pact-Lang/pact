@@ -29,9 +29,9 @@ use crate::mediation::{find_tool_decl, MediationError, RuntimeMediator};
 use crate::observation_store::{
     new_observation, new_session_id, ObservationKind, ObservationStore,
 };
+use crate::rate_limit::RateLimiter;
 use crate::search::{search_agent_observations, SearchResult};
 use crate::summarizer::finalize_session;
-use crate::rate_limit::RateLimiter;
 use crate::types::{ContentBlock, StopReason, ToolResultContent};
 use crate::DispatchError;
 
@@ -113,7 +113,10 @@ impl ToolUseLoop {
         // Start observation session
         if let Some(store) = &self.observation_store {
             if let Err(e) = store.start_session(&session_id, &agent.name) {
-                warn!(agent = agent.name, "failed to start observation session: {}", e);
+                warn!(
+                    agent = agent.name,
+                    "failed to start observation session: {}", e
+                );
             }
         }
 
@@ -178,8 +181,7 @@ impl ToolUseLoop {
             // Record the API call and tokens
             if let Some(limiter) = &self.rate_limiter {
                 limiter.record_agent_call(&agent.name);
-                let tokens =
-                    (response.usage.input_tokens + response.usage.output_tokens) as u64;
+                let tokens = (response.usage.input_tokens + response.usage.output_tokens) as u64;
                 limiter.record_flow_tokens(tool_name, tokens);
             }
 
@@ -226,7 +228,10 @@ impl ToolUseLoop {
                             Some(tool_name),
                             None,
                             &text,
-                            Some(response.usage.input_tokens as u64 + response.usage.output_tokens as u64),
+                            Some(
+                                response.usage.input_tokens as u64
+                                    + response.usage.output_tokens as u64,
+                            ),
                             ObservationKind::AgentResponse,
                         );
                         if let Err(e) = store.record(&obs) {
@@ -337,7 +342,10 @@ impl ToolUseLoop {
                                     ObservationKind::ToolResult,
                                 );
                                 if let Err(e) = store.record(&obs) {
-                                    warn!(agent = agent.name, "failed to record tool result: {}", e);
+                                    warn!(
+                                        agent = agent.name,
+                                        "failed to record tool result: {}", e
+                                    );
                                 }
                             }
 
@@ -368,7 +376,10 @@ impl ToolUseLoop {
                         .collect::<Vec<_>>()
                         .join("");
                     if !text.is_empty() {
-                        warn!(agent = agent.name, "response truncated at max_tokens, using partial output");
+                        warn!(
+                            agent = agent.name,
+                            "response truncated at max_tokens, using partial output"
+                        );
                         return Ok(Value::ToolResult(text));
                     }
                     return Err(DispatchError::MaxTokens);
@@ -474,7 +485,11 @@ async fn execute_tool_once(
     if let Some(tool_decl) = find_tool_decl(program, tool_name) {
         // Check for source-based execution first (built-in providers)
         if let Some(source) = &tool_decl.source {
-            debug!(tool = tool_name, provider = source.capability.as_str(), "using provider");
+            debug!(
+                tool = tool_name,
+                provider = source.capability.as_str(),
+                "using provider"
+            );
             let params = extract_params(input);
             return crate::providers::execute_provider(&source.capability, &params).await;
         }
@@ -485,7 +500,12 @@ async fn execute_tool_once(
 
             // MCP handlers are routed through the connection pool
             if let HandlerSpec::Mcp { server, tool } = &spec {
-                debug!(tool_name, mcp_server = server.as_str(), mcp_tool = tool.as_str(), "via MCP");
+                debug!(
+                    tool_name,
+                    mcp_server = server.as_str(),
+                    mcp_tool = tool.as_str(),
+                    "via MCP"
+                );
                 let pool = McpConnectionPool::from_program(program);
                 return pool.call_tool(server, tool, input.clone()).await;
             }
@@ -797,16 +817,24 @@ mod tests {
 
         // Add multiple observations so TF-IDF has meaningful IDF scores
         let obs1 = new_observation(
-            sid, "agent_m", Some("classify_issues"),
-            None, "classified issues by diagram type and persona",
-            None, ObservationKind::ToolResult,
+            sid,
+            "agent_m",
+            Some("classify_issues"),
+            None,
+            "classified issues by diagram type and persona",
+            None,
+            ObservationKind::ToolResult,
         );
         store.record(&obs1).unwrap();
 
         let obs2 = new_observation(
-            sid, "agent_m", Some("fetch_data"),
-            None, "fetched raw data from the API endpoint",
-            None, ObservationKind::ToolResult,
+            sid,
+            "agent_m",
+            Some("fetch_data"),
+            None,
+            "fetched raw data from the API endpoint",
+            None,
+            ObservationKind::ToolResult,
         );
         store.record(&obs2).unwrap();
 

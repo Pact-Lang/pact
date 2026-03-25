@@ -949,7 +949,7 @@ mod tests {
         // Solid block of digits
         assert!(contains_credit_card_pattern("4111111111111111"));
         assert!(contains_credit_card_pattern("4111111111111")); // 13 digits
-        // Grouped format: DDDD sep DDDD sep DDDD sep DDDD
+                                                                // Grouped format: DDDD sep DDDD sep DDDD sep DDDD
         assert!(contains_credit_card_pattern("4111 1111 1111 1111"));
         assert!(contains_credit_card_pattern("4111-1111-1111-1111"));
         // Too short

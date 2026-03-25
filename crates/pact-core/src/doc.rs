@@ -46,7 +46,7 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
             DeclKind::Skill(s) => skills.push(s),
             DeclKind::Template(t) => templates.push(t),
             DeclKind::Directive(d) => directives.push(d),
-            DeclKind::Import(_) => {} // imports resolved by loader
+            DeclKind::Import(_) => {}  // imports resolved by loader
             DeclKind::Connect(_) => {} // MCP connections are structural
             DeclKind::Lesson(_) => {}  // lessons handled separately
         }

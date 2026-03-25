@@ -672,12 +672,8 @@ impl<'a> AgentFlowParser<'a> {
                 }
             }
             NodeType::Schema => Ok(MetadataTarget::Schema(id.to_string(), label.to_string())),
-            NodeType::Template => {
-                Ok(MetadataTarget::Template(id.to_string(), label.to_string()))
-            }
-            NodeType::Directive => {
-                Ok(MetadataTarget::Directive(id.to_string(), label.to_string()))
-            }
+            NodeType::Template => Ok(MetadataTarget::Template(id.to_string(), label.to_string())),
+            NodeType::Directive => Ok(MetadataTarget::Directive(id.to_string(), label.to_string())),
             NodeType::Diamond => {
                 // Diamond nodes are type references — treat as schema.
                 Ok(MetadataTarget::Schema(id.to_string(), label.to_string()))
@@ -769,12 +765,7 @@ impl<'a> AgentFlowParser<'a> {
             }
             MetadataTarget::PostEnd(container_id) => {
                 // Apply metadata to the matching agent or flow.
-                if let Some(agent) = self
-                    .graph
-                    .agents
-                    .iter_mut()
-                    .find(|a| a.id == container_id)
-                {
+                if let Some(agent) = self.graph.agents.iter_mut().find(|a| a.id == container_id) {
                     if let Some(model) = extract_kv(&raw, "model") {
                         agent.model = Some(unquote(&model));
                     }
@@ -806,12 +797,7 @@ impl<'a> AgentFlowParser<'a> {
                         }
                     }
                 }
-                if let Some(flow) = self
-                    .graph
-                    .flows
-                    .iter_mut()
-                    .find(|f| f.name == container_id)
-                {
+                if let Some(flow) = self.graph.flows.iter_mut().find(|f| f.name == container_id) {
                     if let Some(params_str) = extract_kv(&raw, "params") {
                         let unquoted = unquote(&params_str);
                         for pair in unquoted.split(',') {
@@ -852,12 +838,7 @@ impl<'a> AgentFlowParser<'a> {
                     }
                 }
                 // Test case metadata (assert, expects).
-                if let Some(test) = self
-                    .graph
-                    .tests
-                    .iter_mut()
-                    .find(|t| t.id == container_id)
-                {
+                if let Some(test) = self.graph.tests.iter_mut().find(|t| t.id == container_id) {
                     if let Some(assert_expr) = extract_kv(&raw, "assert") {
                         test.metadata.assert_expr = Some(unquote(&assert_expr));
                     }
@@ -1051,7 +1032,12 @@ impl<'a> AgentFlowParser<'a> {
         // Try each edge type in order of specificity (longest match first).
         // `o--o` bidirectional
         if trimmed.contains("o--o") {
-            return self.parse_simple_edge(trimmed, "o--o", EdgeType::Bidirectional, EdgeStroke::Normal);
+            return self.parse_simple_edge(
+                trimmed,
+                "o--o",
+                EdgeType::Bidirectional,
+                EdgeStroke::Normal,
+            );
         }
         // `==>` pipeline (thick)
         if trimmed.contains("==>") {
@@ -1059,15 +1045,30 @@ impl<'a> AgentFlowParser<'a> {
         }
         // `-.->` reference (dashed, legacy)
         if trimmed.contains("-.->") {
-            return self.parse_simple_edge(trimmed, "-.->", EdgeType::Reference, EdgeStroke::Dotted);
+            return self.parse_simple_edge(
+                trimmed,
+                "-.->",
+                EdgeType::Reference,
+                EdgeStroke::Dotted,
+            );
         }
         // `-.-` reference/association (dashed, no arrow)
         if trimmed.contains("-.-") && !trimmed.contains("-.->") {
-            return self.parse_simple_edge(trimmed, "-.-", EdgeType::Association, EdgeStroke::Dotted);
+            return self.parse_simple_edge(
+                trimmed,
+                "-.-",
+                EdgeType::Association,
+                EdgeStroke::Dotted,
+            );
         }
         // `-->>` delegation
         if trimmed.contains("-->>") {
-            return self.parse_simple_edge(trimmed, "-->>", EdgeType::Delegation, EdgeStroke::Normal);
+            return self.parse_simple_edge(
+                trimmed,
+                "-->>",
+                EdgeType::Delegation,
+                EdgeStroke::Normal,
+            );
         }
         // `--x` error
         if trimmed.contains("--x") {
@@ -1075,11 +1076,25 @@ impl<'a> AgentFlowParser<'a> {
         }
         // `--o` output binding
         if trimmed.contains("--o") && !trimmed.contains("o--o") {
-            return self.parse_simple_edge(trimmed, "--o", EdgeType::OutputBinding, EdgeStroke::Normal);
+            return self.parse_simple_edge(
+                trimmed,
+                "--o",
+                EdgeType::OutputBinding,
+                EdgeStroke::Normal,
+            );
         }
         // `---` association
-        if trimmed.contains("---") && !trimmed.contains("-->>") && !trimmed.contains("--x") && !trimmed.contains("--o") {
-            return self.parse_simple_edge(trimmed, "---", EdgeType::Association, EdgeStroke::Normal);
+        if trimmed.contains("---")
+            && !trimmed.contains("-->>")
+            && !trimmed.contains("--x")
+            && !trimmed.contains("--o")
+        {
+            return self.parse_simple_edge(
+                trimmed,
+                "---",
+                EdgeType::Association,
+                EdgeStroke::Normal,
+            );
         }
         // `-->` flow (default)
         if trimmed.contains("-->") {
@@ -1726,10 +1741,7 @@ agentflow LR
         assert_eq!(graph.agents[0].id, "researcher");
         assert_eq!(graph.agents[0].nodes.len(), 1);
         assert_eq!(graph.agents[0].nodes[0].id, "research");
-        assert_eq!(
-            graph.agents[0].nodes[0].metadata.description,
-            "Do research"
-        );
+        assert_eq!(graph.agents[0].nodes[0].metadata.description, "Do research");
         assert_eq!(
             graph.agents[0].nodes[0].metadata.requires,
             vec!["^net.read"]
@@ -1940,7 +1952,10 @@ agentflow TB
         let graph = parse_agentflow_text(input).unwrap();
         assert_eq!(graph.templates.len(), 1);
         assert_eq!(graph.templates[0].id, "website_copy");
-        assert_eq!(graph.templates[0].metadata.fields.get("HERO_TAGLINE"), Some(&"String".to_string()));
+        assert_eq!(
+            graph.templates[0].metadata.fields.get("HERO_TAGLINE"),
+            Some(&"String".to_string())
+        );
         assert_eq!(graph.templates[0].metadata.sections, vec!["ENGLISH"]);
     }
 
@@ -1990,8 +2005,14 @@ agentflow TB
 "#;
         let graph = parse_agentflow_text(input).unwrap();
         assert_eq!(graph.agents[0].nodes[0].shape, "subroutine");
-        assert_eq!(graph.agents[0].nodes[0].metadata.requires, vec!["^net.read"]);
-        assert_eq!(graph.agents[0].nodes[0].metadata.cache.as_deref(), Some("5m"));
+        assert_eq!(
+            graph.agents[0].nodes[0].metadata.requires,
+            vec!["^net.read"]
+        );
+        assert_eq!(
+            graph.agents[0].nodes[0].metadata.cache.as_deref(),
+            Some("5m")
+        );
     }
 
     #[test]
@@ -2135,7 +2156,10 @@ agentflow TB
         let graph = parse_agentflow_text(input).unwrap();
         assert_eq!(graph.flows.len(), 1);
         assert_eq!(graph.flows[0].name, "main");
-        assert_eq!(graph.flows[0].params.get("topic"), Some(&"String".to_string()));
+        assert_eq!(
+            graph.flows[0].params.get("topic"),
+            Some(&"String".to_string())
+        );
         assert_eq!(graph.flows[0].returns.as_deref(), Some("String"));
     }
 
@@ -2156,7 +2180,10 @@ agentflow TB
         let graph = parse_agentflow_text(input).unwrap();
         assert_eq!(graph.agents.len(), 1);
         assert_eq!(graph.agents[0].permits.len(), 2);
-        assert_eq!(graph.agents[0].prompt.as_deref(), Some("You are a researcher"));
+        assert_eq!(
+            graph.agents[0].prompt.as_deref(),
+            Some("You are a researcher")
+        );
     }
 
     #[test]
@@ -2178,7 +2205,11 @@ agentflow TB
         let graph = parse_agentflow_text(input).unwrap();
         let pact = crate::agentflow_convert::agentflow_graph_to_pact(&graph);
         assert!(pact.contains("tool #search"), "No tool in PACT:\n{}", pact);
-        assert!(pact.contains("agent @researcher"), "No agent in PACT:\n{}", pact);
+        assert!(
+            pact.contains("agent @researcher"),
+            "No agent in PACT:\n{}",
+            pact
+        );
         assert!(pact.contains("description: <<Search the web>>"));
         assert!(pact.contains("requires: [^net.read]"));
     }

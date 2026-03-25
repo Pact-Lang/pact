@@ -81,7 +81,13 @@ pub fn build_summary(session_id: &str, observations: &[Observation]) -> SessionS
     let tool_call_count = tools_called.len();
 
     // Build compact text
-    let text = format_summary_text(&agent, &tools_called, error_count, total_tokens, &final_output);
+    let text = format_summary_text(
+        &agent,
+        &tools_called,
+        error_count,
+        total_tokens,
+        &final_output,
+    );
 
     SessionSummary {
         session_id: session_id.to_string(),
@@ -109,7 +115,11 @@ fn format_summary_text(
     if !tools_called.is_empty() {
         // Deduplicate consecutive tool calls
         let unique_tools: Vec<&str> = dedup_consecutive(tools_called);
-        parts.push(format!("called {} tool(s): {}", tools_called.len(), unique_tools.join(" -> ")));
+        parts.push(format!(
+            "called {} tool(s): {}",
+            tools_called.len(),
+            unique_tools.join(" -> ")
+        ));
     } else {
         parts.push("no tool calls".to_string());
     }
@@ -178,11 +188,51 @@ mod tests {
     #[test]
     fn summarize_tool_sequence() {
         let obs = vec![
-            new_observation("s1", "agent_a", Some("fetch"), Some("{}"), "tool_use:fetch", None, ObservationKind::ToolCall),
-            new_observation("s1", "agent_a", Some("fetch"), None, "data", Some(100), ObservationKind::ToolResult),
-            new_observation("s1", "agent_a", Some("classify"), Some("{}"), "tool_use:classify", None, ObservationKind::ToolCall),
-            new_observation("s1", "agent_a", Some("classify"), None, "classified", Some(200), ObservationKind::ToolResult),
-            new_observation("s1", "agent_a", Some("fetch"), None, "final report", Some(150), ObservationKind::AgentResponse),
+            new_observation(
+                "s1",
+                "agent_a",
+                Some("fetch"),
+                Some("{}"),
+                "tool_use:fetch",
+                None,
+                ObservationKind::ToolCall,
+            ),
+            new_observation(
+                "s1",
+                "agent_a",
+                Some("fetch"),
+                None,
+                "data",
+                Some(100),
+                ObservationKind::ToolResult,
+            ),
+            new_observation(
+                "s1",
+                "agent_a",
+                Some("classify"),
+                Some("{}"),
+                "tool_use:classify",
+                None,
+                ObservationKind::ToolCall,
+            ),
+            new_observation(
+                "s1",
+                "agent_a",
+                Some("classify"),
+                None,
+                "classified",
+                Some(200),
+                ObservationKind::ToolResult,
+            ),
+            new_observation(
+                "s1",
+                "agent_a",
+                Some("fetch"),
+                None,
+                "final report",
+                Some(150),
+                ObservationKind::AgentResponse,
+            ),
         ];
 
         let summary = build_summary("s1", &obs);
@@ -197,8 +247,24 @@ mod tests {
     #[test]
     fn summarize_with_errors() {
         let obs = vec![
-            new_observation("s2", "agent_b", Some("search"), Some("{}"), "tool_use:search", None, ObservationKind::ToolCall),
-            new_observation("s2", "agent_b", Some("search"), None, "failed", None, ObservationKind::Error),
+            new_observation(
+                "s2",
+                "agent_b",
+                Some("search"),
+                Some("{}"),
+                "tool_use:search",
+                None,
+                ObservationKind::ToolCall,
+            ),
+            new_observation(
+                "s2",
+                "agent_b",
+                Some("search"),
+                None,
+                "failed",
+                None,
+                ObservationKind::Error,
+            ),
         ];
 
         let summary = build_summary("s2", &obs);
@@ -213,12 +279,24 @@ mod tests {
         store.start_session(sid, "agent_c").unwrap();
 
         let obs = new_observation(
-            sid, "agent_c", Some("tool_x"), None, "tool_use:tool_x", None, ObservationKind::ToolCall,
+            sid,
+            "agent_c",
+            Some("tool_x"),
+            None,
+            "tool_use:tool_x",
+            None,
+            ObservationKind::ToolCall,
         );
         store.record(&obs).unwrap();
 
         let obs = new_observation(
-            sid, "agent_c", Some("tool_x"), None, "done", Some(50), ObservationKind::AgentResponse,
+            sid,
+            "agent_c",
+            Some("tool_x"),
+            None,
+            "done",
+            Some(50),
+            ObservationKind::AgentResponse,
         );
         store.record(&obs).unwrap();
 

@@ -354,10 +354,7 @@ mod tests {
         let err = limiter.check_global_limit().unwrap_err();
         assert_eq!(
             err,
-            RateLimitError::GlobalCallLimitExceeded {
-                current: 3,
-                max: 3,
-            }
+            RateLimitError::GlobalCallLimitExceeded { current: 3, max: 3 }
         );
     }
 
@@ -429,10 +426,7 @@ mod tests {
         assert_eq!(summary.global_calls, 1_000);
         assert_eq!(summary.flow_tokens.get("shared"), Some(&10_000));
         for i in 0..10 {
-            assert_eq!(
-                summary.agent_calls.get(&format!("agent_{}", i)),
-                Some(&100)
-            );
+            assert_eq!(summary.agent_calls.get(&format!("agent_{}", i)), Some(&100));
         }
     }
 

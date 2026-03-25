@@ -139,7 +139,10 @@ fn redact_for_log(s: &str) -> String {
         result.push(ch);
         if ch == '=' {
             // Peek ahead to see the value length
-            let rest: String = chars.clone().take_while(|c| *c != '&' && *c != ' ').collect();
+            let rest: String = chars
+                .clone()
+                .take_while(|c| *c != '&' && *c != ' ')
+                .collect();
             if rest.len() > 8 {
                 result.push_str("[REDACTED]");
                 // Consume the value

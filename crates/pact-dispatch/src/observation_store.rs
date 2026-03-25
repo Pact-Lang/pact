@@ -209,10 +209,7 @@ impl ObservationStore {
     }
 
     /// Count observations for a session.
-    pub fn count_session_observations(
-        &self,
-        session_id: &str,
-    ) -> Result<usize, rusqlite::Error> {
+    pub fn count_session_observations(&self, session_id: &str) -> Result<usize, rusqlite::Error> {
         self.conn.query_row(
             "SELECT COUNT(*) FROM observations WHERE session_id = ?1",
             params![session_id],
@@ -221,10 +218,7 @@ impl ObservationStore {
     }
 
     /// Get the session summary, if one exists.
-    pub fn get_session_summary(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<String>, rusqlite::Error> {
+    pub fn get_session_summary(&self, session_id: &str) -> Result<Option<String>, rusqlite::Error> {
         self.conn.query_row(
             "SELECT summary FROM sessions WHERE id = ?1",
             params![session_id],

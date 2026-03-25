@@ -306,10 +306,7 @@ impl Interpreter {
             ExprKind::ToolRef(name) => Ok(Value::String(format!("#{name}"))),
             ExprKind::MemoryRef(name) => {
                 // Memory read — look up in the current agent's memory store.
-                let agent = self
-                    .current_agent
-                    .as_deref()
-                    .unwrap_or("default");
+                let agent = self.current_agent.as_deref().unwrap_or("default");
                 let store = crate::memory::MemoryStore::load(agent);
                 match store.get(name) {
                     Some(val) => Ok(Value::String(val.to_string())),
@@ -370,7 +367,8 @@ impl Interpreter {
                 let prev_agent = self.current_agent.take();
                 self.current_agent = Some(agent_name.clone());
 
-                let result = self.dispatcher
+                let result = self
+                    .dispatcher
                     .dispatch(
                         &agent_name,
                         &tool_name,
@@ -483,8 +481,7 @@ impl Interpreter {
                     // If inside an agent context, persist assignments to memory.
                     if let Some(agent_name) = &self.current_agent {
                         if let ExprKind::Assign { name, .. } = &e.kind {
-                            let mut store =
-                                crate::memory::MemoryStore::load(agent_name);
+                            let mut store = crate::memory::MemoryStore::load(agent_name);
                             store.set(name.clone(), val.to_string());
                         }
                     }

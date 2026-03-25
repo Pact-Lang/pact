@@ -175,11 +175,39 @@ fn tokenize(text: &str) -> Vec<String> {
 fn is_stopword(word: &str) -> bool {
     matches!(
         word,
-        "the" | "and" | "for" | "are" | "but" | "not" | "you" | "all"
-            | "can" | "had" | "her" | "was" | "one" | "our" | "out"
-            | "has" | "have" | "been" | "from" | "this" | "that"
-            | "with" | "will" | "they" | "each" | "which" | "their"
-            | "said" | "what" | "its" | "into" | "than" | "them"
+        "the"
+            | "and"
+            | "for"
+            | "are"
+            | "but"
+            | "not"
+            | "you"
+            | "all"
+            | "can"
+            | "had"
+            | "her"
+            | "was"
+            | "one"
+            | "our"
+            | "out"
+            | "has"
+            | "have"
+            | "been"
+            | "from"
+            | "this"
+            | "that"
+            | "with"
+            | "will"
+            | "they"
+            | "each"
+            | "which"
+            | "their"
+            | "said"
+            | "what"
+            | "its"
+            | "into"
+            | "than"
+            | "them"
     )
 }
 
@@ -203,9 +231,17 @@ mod tests {
     #[test]
     fn search_finds_relevant_observations() {
         let observations = vec![
-            make_obs("agent_a", "fetch_issues", "found 42 open issues about rendering"),
+            make_obs(
+                "agent_a",
+                "fetch_issues",
+                "found 42 open issues about rendering",
+            ),
             make_obs("agent_a", "classify", "classified issues by diagram type"),
-            make_obs("agent_a", "profile", "built persona profiles for developers"),
+            make_obs(
+                "agent_a",
+                "profile",
+                "built persona profiles for developers",
+            ),
             make_obs("agent_a", "cluster", "identified 8 themes in the backlog"),
         ];
 
@@ -241,9 +277,11 @@ mod tests {
 
     #[test]
     fn search_no_matches() {
-        let observations = vec![
-            make_obs("a", "t", "completely unrelated content about cooking"),
-        ];
+        let observations = vec![make_obs(
+            "a",
+            "t",
+            "completely unrelated content about cooking",
+        )];
         let index = SearchIndex::build(observations);
         let results = index.search("quantum physics", 5);
         assert!(results.is_empty());
@@ -261,10 +299,7 @@ mod tests {
 
     #[test]
     fn index_size() {
-        let observations = vec![
-            make_obs("a", "t1", "one"),
-            make_obs("a", "t2", "two"),
-        ];
+        let observations = vec![make_obs("a", "t1", "one"), make_obs("a", "t2", "two")];
         let index = SearchIndex::build(observations);
         assert_eq!(index.len(), 2);
         assert!(!index.is_empty());
@@ -279,14 +314,24 @@ mod tests {
         store.start_session(sid, "agent_s").unwrap();
 
         let obs = new_observation(
-            sid, "agent_s", Some("fetch"), None, "found issues about flowchart rendering",
-            None, ObservationKind::ToolResult,
+            sid,
+            "agent_s",
+            Some("fetch"),
+            None,
+            "found issues about flowchart rendering",
+            None,
+            ObservationKind::ToolResult,
         );
         store.record(&obs).unwrap();
 
         let obs = new_observation(
-            sid, "agent_s", Some("classify"), None, "classified by persona and diagram",
-            None, ObservationKind::ToolResult,
+            sid,
+            "agent_s",
+            Some("classify"),
+            None,
+            "classified by persona and diagram",
+            None,
+            ObservationKind::ToolResult,
         );
         store.record(&obs).unwrap();
 

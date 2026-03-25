@@ -61,10 +61,6 @@ pub mod mcp_client;
 pub mod mediation;
 /// Observation capture for agent memory (SQLite-backed).
 pub mod observation_store;
-/// TF-IDF semantic search over observations.
-pub mod search;
-/// Session summarization for agent memory.
-pub mod summarizer;
 /// Ollama local model dispatcher.
 pub mod ollama;
 /// OpenAI Chat Completions dispatcher.
@@ -73,6 +69,10 @@ pub mod openai;
 pub mod providers;
 /// Per-agent and per-flow rate limiting.
 pub mod rate_limit;
+/// TF-IDF semantic search over observations.
+pub mod search;
+/// Session summarization for agent memory.
+pub mod summarizer;
 /// Multi-turn tool-use conversation loop.
 pub mod tool_loop;
 /// Anthropic Messages API request and response types.

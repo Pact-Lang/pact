@@ -767,7 +767,8 @@ impl<'t> Parser<'t> {
                 _ => {
                     let span = self.current_span();
                     return Err(ParseError::UnexpectedToken {
-                        expected: "transport string (e.g. \"stdio cmd\" or \"sse url\")".to_string(),
+                        expected: "transport string (e.g. \"stdio cmd\" or \"sse url\")"
+                            .to_string(),
                         found: self.peek_kind().describe().to_string(),
                         span: (span.start..span.end).into(),
                     });

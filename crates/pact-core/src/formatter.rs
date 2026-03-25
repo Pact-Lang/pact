@@ -121,10 +121,8 @@ impl Formatter {
                 self.indent();
                 for entry in &c.servers {
                     self.push_indent();
-                    self.buf.push_str(&format!(
-                        "{} \"{}\"\n",
-                        entry.name, entry.transport
-                    ));
+                    self.buf
+                        .push_str(&format!("{} \"{}\"\n", entry.name, entry.transport));
                 }
                 self.dedent();
                 self.push_line("}");

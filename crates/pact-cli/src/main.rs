@@ -250,7 +250,15 @@ fn main() -> Result<()> {
             claude_skill,
             claude_md,
             recommend_mcp,
-        } => cmd_build(&file, &out_dir, &target, watch, claude_skill, claude_md, recommend_mcp),
+        } => cmd_build(
+            &file,
+            &out_dir,
+            &target,
+            watch,
+            claude_skill,
+            claude_md,
+            recommend_mcp,
+        ),
         Command::Run {
             file,
             flow,
@@ -772,14 +780,9 @@ fn write_html_report(
                 html_escape(title)
             ));
             for entry in entries {
-                let (label, value) = entry
-                    .split_once(": ")
-                    .unwrap_or(("", entry));
+                let (label, value) = entry.split_once(": ").unwrap_or(("", entry));
                 if label.is_empty() {
-                    sections_html.push_str(&format!(
-                        "<p>{}</p>",
-                        html_escape(value)
-                    ));
+                    sections_html.push_str(&format!("<p>{}</p>", html_escape(value)));
                 } else {
                     sections_html.push_str(&format!(
                         r#"<div class="entry"><span class="entry-label">{}</span> <span class="entry-value">{}</span></div>"#,
@@ -1228,8 +1231,8 @@ fn cmd_list_declarations(path: &str) -> Result<()> {
             DeclKind::Template(_) => {}   // Listed separately if needed
             DeclKind::Directive(_) => {}  // Listed separately if needed
             DeclKind::Import(_) => {}     // Resolved by loader
-            DeclKind::Connect(_) => {}   // MCP connections
-            DeclKind::Lesson(_) => {}    // Lessons are process memory
+            DeclKind::Connect(_) => {}    // MCP connections
+            DeclKind::Lesson(_) => {}     // Lessons are process memory
         }
     }
 
@@ -1475,7 +1478,10 @@ fn cmd_mcp_list_tools(server: &str, path: &str) -> Result<()> {
     let command = if let Some(cmd) = transport.strip_prefix("stdio ") {
         cmd
     } else {
-        miette::bail!("only stdio transport is currently supported (got: {})", transport);
+        miette::bail!(
+            "only stdio transport is currently supported (got: {})",
+            transport
+        );
     };
 
     // Connect and list tools
@@ -1487,7 +1493,10 @@ fn cmd_mcp_list_tools(server: &str, path: &str) -> Result<()> {
         let mut conn = pact_dispatch::mcp_client::McpConnection::connect_stdio(server, command)
             .await
             .map_err(|e| miette::miette!("{}", e))?;
-        let tools = conn.list_tools().await.map_err(|e| miette::miette!("{}", e))?;
+        let tools = conn
+            .list_tools()
+            .await
+            .map_err(|e| miette::miette!("{}", e))?;
         Ok::<Vec<pact_dispatch::mcp_client::McpToolInfo>, miette::Report>(tools.to_vec())
     })?;
 

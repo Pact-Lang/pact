@@ -201,7 +201,10 @@ fn test_hello_agent_tests_pass() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Should report test results
     assert!(
-        stdout.contains("pass") || stdout.contains("PASS") || stdout.contains("ok") || stdout.contains("1"),
+        stdout.contains("pass")
+            || stdout.contains("PASS")
+            || stdout.contains("ok")
+            || stdout.contains("1"),
         "pact test output should indicate passing tests, got: {}",
         stdout,
     );
@@ -282,7 +285,9 @@ fn to_mermaid_contains_flowchart() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("agentflow") || stdout.contains("toolDefinition") || stdout.contains("agentDefinition"),
+        stdout.contains("agentflow")
+            || stdout.contains("toolDefinition")
+            || stdout.contains("agentDefinition"),
         "pact to-mermaid output should contain agentflow diagram syntax, got: {}",
         stdout,
     );
@@ -444,7 +449,9 @@ fn check_nonexistent_file_fails_with_error() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("failed to read") || stderr.contains("No such file") || stderr.contains("not found"),
+        stderr.contains("failed to read")
+            || stderr.contains("No such file")
+            || stderr.contains("not found"),
         "error message should indicate the file was not found, got: {}",
         stderr,
     );

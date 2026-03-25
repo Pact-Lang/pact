@@ -154,19 +154,19 @@ impl SymbolIndex {
     /// If the cursor is on a definition, finds all references to that symbol.
     /// If the cursor is on a reference, finds all references to the same symbol.
     /// When `include_definition` is true, the definition site itself is included.
-    pub fn references_at(
-        &self,
-        offset: usize,
-        include_definition: bool,
-    ) -> Vec<Location> {
+    pub fn references_at(&self, offset: usize, include_definition: bool) -> Vec<Location> {
         // Determine what symbol we're on
-        let (name, kind) = if let Some(def) = self.definitions.iter().find(|d| {
-            offset >= d.location.start && offset < d.location.end
-        }) {
+        let (name, kind) = if let Some(def) = self
+            .definitions
+            .iter()
+            .find(|d| offset >= d.location.start && offset < d.location.end)
+        {
             (def.name.as_str(), def.kind)
-        } else if let Some(reference) = self.references.iter().find(|r| {
-            offset >= r.location.start && offset < r.location.end
-        }) {
+        } else if let Some(reference) = self
+            .references
+            .iter()
+            .find(|r| offset >= r.location.start && offset < r.location.end)
+        {
             (reference.name.as_str(), reference.kind)
         } else {
             return Vec::new();
@@ -516,10 +516,7 @@ mod tests {
         let idx = index_from_source(
             r#"tool #web_search { description: <<"search">> requires: [^net.read] params { query :: String } returns :: String }"#,
         );
-        let tool_def = idx
-            .definitions
-            .iter()
-            .find(|d| d.kind == SymbolKind::Tool);
+        let tool_def = idx.definitions.iter().find(|d| d.kind == SymbolKind::Tool);
         assert!(tool_def.is_some());
         assert_eq!(tool_def.unwrap().name, "web_search");
     }
@@ -529,10 +526,7 @@ mod tests {
         let idx = index_from_source(
             r#"skill $research { description: <<"research things">> tools: [#web_search] params { topic :: String } returns :: String }"#,
         );
-        let skill_def = idx
-            .definitions
-            .iter()
-            .find(|d| d.kind == SymbolKind::Skill);
+        let skill_def = idx.definitions.iter().find(|d| d.kind == SymbolKind::Skill);
         assert!(skill_def.is_some());
         assert_eq!(skill_def.unwrap().name, "research");
     }
@@ -540,10 +534,7 @@ mod tests {
     #[test]
     fn flow_definition_is_collected() {
         let idx = index_from_source("flow greet(name :: String) -> String { return name }");
-        let flow_def = idx
-            .definitions
-            .iter()
-            .find(|d| d.kind == SymbolKind::Flow);
+        let flow_def = idx.definitions.iter().find(|d| d.kind == SymbolKind::Flow);
         assert!(flow_def.is_some());
         assert_eq!(flow_def.unwrap().name, "greet");
     }

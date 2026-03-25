@@ -107,7 +107,11 @@ fn collect_agent_names(expr: &Expr, out: &mut Vec<String>) {
         ExprKind::Return(inner) | ExprKind::Fail(inner) => {
             collect_agent_names(inner, out);
         }
-        ExprKind::Pipeline { left, right } | ExprKind::FallbackChain { primary: left, fallback: right } => {
+        ExprKind::Pipeline { left, right }
+        | ExprKind::FallbackChain {
+            primary: left,
+            fallback: right,
+        } => {
             collect_agent_names(left, out);
             collect_agent_names(right, out);
         }
@@ -485,10 +489,14 @@ mod tests {
             }
         "#;
         let program = parse_program(src);
-        let flow = program.decls.iter().find_map(|d| match &d.kind {
-            DeclKind::Flow(f) => Some(f),
-            _ => None,
-        }).unwrap();
+        let flow = program
+            .decls
+            .iter()
+            .find_map(|d| match &d.kind {
+                DeclKind::Flow(f) => Some(f),
+                _ => None,
+            })
+            .unwrap();
 
         let output = generate_flow_skill(flow, &program);
 
@@ -527,10 +535,14 @@ mod tests {
             }
         "#;
         let program = parse_program(src);
-        let flow = program.decls.iter().find_map(|d| match &d.kind {
-            DeclKind::Flow(f) => Some(f),
-            _ => None,
-        }).unwrap();
+        let flow = program
+            .decls
+            .iter()
+            .find_map(|d| match &d.kind {
+                DeclKind::Flow(f) => Some(f),
+                _ => None,
+            })
+            .unwrap();
 
         let output = generate_flow_skill(flow, &program);
 
@@ -579,10 +591,14 @@ mod tests {
             }
         "#;
         let program = parse_program(src);
-        let skill = program.decls.iter().find_map(|d| match &d.kind {
-            DeclKind::Skill(s) => Some(s),
-            _ => None,
-        }).unwrap();
+        let skill = program
+            .decls
+            .iter()
+            .find_map(|d| match &d.kind {
+                DeclKind::Skill(s) => Some(s),
+                _ => None,
+            })
+            .unwrap();
 
         let output = generate_skill_skill(skill, &program);
 
@@ -593,7 +609,9 @@ mod tests {
 
         // Verify strategy becomes body
         assert!(output.contains("## Skill: code_review"));
-        assert!(output.contains("First lint the code to find issues, then auto-format. Report both results."));
+        assert!(output.contains(
+            "First lint the code to find issues, then auto-format. Report both results."
+        ));
 
         // Verify tools section
         assert!(output.contains("### Tools"));
@@ -661,10 +679,14 @@ mod tests {
             }
         "#;
         let program = parse_program(src);
-        let flow = program.decls.iter().find_map(|d| match &d.kind {
-            DeclKind::Flow(f) => Some(f),
-            _ => None,
-        }).unwrap();
+        let flow = program
+            .decls
+            .iter()
+            .find_map(|d| match &d.kind {
+                DeclKind::Flow(f) => Some(f),
+                _ => None,
+            })
+            .unwrap();
 
         let output = generate_flow_skill(flow, &program);
 
@@ -692,10 +714,14 @@ mod tests {
             }
         "#;
         let program = parse_program(src);
-        let skill = program.decls.iter().find_map(|d| match &d.kind {
-            DeclKind::Skill(s) => Some(s),
-            _ => None,
-        }).unwrap();
+        let skill = program
+            .decls
+            .iter()
+            .find_map(|d| match &d.kind {
+                DeclKind::Skill(s) => Some(s),
+                _ => None,
+            })
+            .unwrap();
 
         let output = generate_skill_skill(skill, &program);
 
@@ -730,10 +756,14 @@ mod tests {
             }
         "#;
         let program = parse_program(src);
-        let flow = program.decls.iter().find_map(|d| match &d.kind {
-            DeclKind::Flow(f) => Some(f),
-            _ => None,
-        }).unwrap();
+        let flow = program
+            .decls
+            .iter()
+            .find_map(|d| match &d.kind {
+                DeclKind::Flow(f) => Some(f),
+                _ => None,
+            })
+            .unwrap();
 
         let output = generate_flow_skill(flow, &program);
 

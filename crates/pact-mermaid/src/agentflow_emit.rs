@@ -133,9 +133,7 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
                 let mut sections = Vec::new();
                 for entry in &t.entries {
                     match entry {
-                        TemplateEntry::Field {
-                            name, ty, ..
-                        } => {
+                        TemplateEntry::Field { name, ty, .. } => {
                             fields.insert(name.clone(), type_expr_to_string(ty));
                         }
                         TemplateEntry::Repeat {
@@ -194,9 +192,7 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
                         _ => None,
                     })
                     .collect();
-                let fallbacks = ab.fallbacks.as_ref().map(|_| {
-                    agents.join(" ?> ")
-                });
+                let fallbacks = ab.fallbacks.as_ref().map(|_| agents.join(" ?> "));
                 graph.bundles.push(AgentFlowBundle {
                     id: ab.name.clone(),
                     label: format!("@{}", ab.name),
@@ -305,10 +301,7 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
 // ── Flow edge extraction ───────────────────────────────────────────────────
 
 /// Extract flow edges from a PACT flow body with proper variable-binding tracking.
-fn extract_flow_edges(
-    body: &[pact_core::ast::expr::Expr],
-    edges: &mut Vec<AgentFlowEdge>,
-) {
+fn extract_flow_edges(body: &[pact_core::ast::expr::Expr], edges: &mut Vec<AgentFlowEdge>) {
     use std::collections::HashMap;
 
     let mut var_to_tool: HashMap<String, String> = HashMap::new();
@@ -342,9 +335,7 @@ fn extract_flow_edges(
 
             for arg_name in &args {
                 if let Some(source_tool) = var_to_tool.get(arg_name) {
-                    let is_immediate = prev_tool
-                        .as_ref()
-                        .is_some_and(|(pv, _)| pv == arg_name);
+                    let is_immediate = prev_tool.as_ref().is_some_and(|(pv, _)| pv == arg_name);
                     if !is_immediate {
                         edges.push(AgentFlowEdge {
                             from: source_tool.clone(),
@@ -396,11 +387,10 @@ fn extract_flow_def(f: &FlowDecl) -> AgentFlowDef {
         .params
         .iter()
         .map(|p| {
-            let ty = p
-                .ty
-                .as_ref()
-                .map(type_expr_to_string)
-                .unwrap_or_else(|| "String".to_string());
+            let ty =
+                p.ty.as_ref()
+                    .map(type_expr_to_string)
+                    .unwrap_or_else(|| "String".to_string());
             (p.name.clone(), ty)
         })
         .collect();
@@ -440,9 +430,7 @@ fn extract_full_dispatch_info(
 }
 
 /// Extract tool name and argument names from a dispatch expression.
-fn extract_dispatch_info(
-    expr: &pact_core::ast::expr::Expr,
-) -> Option<(String, Vec<String>)> {
+fn extract_dispatch_info(expr: &pact_core::ast::expr::Expr) -> Option<(String, Vec<String>)> {
     match &expr.kind {
         ExprKind::AgentDispatch { tool, args, .. } => {
             if let ExprKind::ToolRef(name) = &tool.kind {
@@ -501,11 +489,10 @@ fn tool_decl_to_node(t: &pact_core::ast::stmt::ToolDecl) -> AgentFlowToolNode {
         .params
         .iter()
         .map(|p| {
-            let ty = p
-                .ty
-                .as_ref()
-                .map(type_expr_to_string)
-                .unwrap_or_else(|| "String".to_string());
+            let ty =
+                p.ty.as_ref()
+                    .map(type_expr_to_string)
+                    .unwrap_or_else(|| "String".to_string());
             (p.name.clone(), ty)
         })
         .collect();
@@ -557,11 +544,10 @@ fn skill_decl_to_node(s: &pact_core::ast::stmt::SkillDecl) -> AgentFlowSkillNode
         .params
         .iter()
         .map(|p| {
-            let ty = p
-                .ty
-                .as_ref()
-                .map(type_expr_to_string)
-                .unwrap_or_else(|| "String".to_string());
+            let ty =
+                p.ty.as_ref()
+                    .map(type_expr_to_string)
+                    .unwrap_or_else(|| "String".to_string());
             (p.name.clone(), ty)
         })
         .collect();
@@ -785,7 +771,9 @@ fn emit_agentflow_text(graph: &AgentFlowGraph, program: &Program) -> String {
 fn emit_agent_block(out: &mut String, agent: &AgentFlowAgent, indent: &str) {
     out.push_str(&format!(
         "\n{}agent {}[\"{}\"]\n",
-        indent, agent.id, to_title_case(&agent.id)
+        indent,
+        agent.id,
+        to_title_case(&agent.id)
     ));
 
     // Emit tool and skill node IDs inside the agent block.
@@ -808,10 +796,7 @@ fn emit_agent_block(out: &mut String, agent: &AgentFlowAgent, indent: &str) {
         // Skill metadata.
         let mut skill_meta = Vec::new();
         if let Some(strategy) = &skill.metadata.strategy {
-            skill_meta.push(format!(
-                "strategy: \"{}\"",
-                strategy.replace('"', "\\\"")
-            ));
+            skill_meta.push(format!("strategy: \"{}\"", strategy.replace('"', "\\\"")));
         }
         if !skill.metadata.params.is_empty() {
             let params_csv: Vec<String> = skill
@@ -860,9 +845,10 @@ fn emit_agent_block(out: &mut String, agent: &AgentFlowAgent, indent: &str) {
         p.iter().map(|s| format!("^{}", s)).collect()
     };
     if !permits.is_empty() {
-        let perm_strs: Vec<&str> = permits.iter().map(|p| {
-            p.strip_prefix('^').unwrap_or(p)
-        }).collect();
+        let perm_strs: Vec<&str> = permits
+            .iter()
+            .map(|p| p.strip_prefix('^').unwrap_or(p))
+            .collect();
         meta_parts.push(format!("permits: \"{}\"", perm_strs.join(", ")));
     }
 
@@ -942,12 +928,8 @@ fn emit_flow_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlowGrap
         out.push_str("      end\n\n");
 
         // Collect deferred metadata (emitted outside flow container).
-        deferred_meta.push(format!(
-            "{tool_id}@{{ shape: subroutine }}"
-        ));
-        deferred_meta.push(format!(
-            "{out_id}@{{ shape: doc }}"
-        ));
+        deferred_meta.push(format!("{tool_id}@{{ shape: subroutine }}"));
+        deferred_meta.push(format!("{out_id}@{{ shape: doc }}"));
     }
 
     // Emit linear chain edges between steps.
@@ -1003,7 +985,9 @@ fn emit_flow_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlowGrap
     // Emit flow-level deferred metadata.
     let mut meta_parts = Vec::new();
     if !flow.params.is_empty() {
-        let param_strs: Vec<String> = flow.params.iter()
+        let param_strs: Vec<String> = flow
+            .params
+            .iter()
             .map(|(k, v)| format!("{}: {}", k, v))
             .collect();
         meta_parts.push(format!("params: \"{}\"", param_strs.join(", ")));
@@ -1070,7 +1054,10 @@ fn emit_pipeline_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlow
     // Collapse sub-flow references.
     for step in &flow.steps {
         if step.agent.starts_with("flow:") {
-            out.push_str(&format!("    {}@{{\n      view: collapsed\n    }}\n", step.tool));
+            out.push_str(&format!(
+                "    {}@{{\n      view: collapsed\n    }}\n",
+                step.tool
+            ));
         }
     }
 }
@@ -1110,10 +1097,7 @@ fn emit_templates(out: &mut String, program: &Program) {
                                 name, ty_str, count, desc
                             ));
                         } else {
-                            out.push_str(&format!(
-                                "    {}: {} * {}\n",
-                                name, ty_str, count
-                            ));
+                            out.push_str(&format!("    {}: {} * {}\n", name, ty_str, count));
                         }
                     }
                     TemplateEntry::Section { name, description } => {
@@ -1215,7 +1199,10 @@ fn emit_deferred_metadata(out: &mut String, graph: &AgentFlowGraph) {
                 parts.push(format!("returns: \"{}\"", ret));
             }
             if !tool.metadata.requires.is_empty() {
-                parts.push(format!("requires: \"{}\"", tool.metadata.requires.join(", ")));
+                parts.push(format!(
+                    "requires: \"{}\"",
+                    tool.metadata.requires.join(", ")
+                ));
             }
             if let Some(cache) = &tool.metadata.cache {
                 parts.push(format!("cache: \"{}\"", cache));
@@ -1275,7 +1262,6 @@ fn make_agent_ref(name: &str) -> String {
     format!("{}{}", prefix, capitalized)
 }
 
-
 /// Recursively emit delegation edges for a permission tree.
 fn emit_permit_tree_edges(
     edges: &mut Vec<AgentFlowEdge>,
@@ -1322,11 +1308,7 @@ fn extract_test_targets(expr: &pact_core::ast::expr::Expr) -> Vec<String> {
 
 /// Emit a directive as a trapezoid-shaped node with metadata.
 fn emit_directive_node(out: &mut String, dir: &AgentFlowDirectiveNode) {
-    out.push_str(&format!(
-        "\n{}[\"{}\"]\n",
-        dir.id,
-        to_title_case(&dir.id)
-    ));
+    out.push_str(&format!("\n{}[\"{}\"]\n", dir.id, to_title_case(&dir.id)));
 
     let mut meta_parts = vec!["shape: trapezoid".to_string()];
     if !dir.metadata.params.is_empty() {
@@ -1350,10 +1332,7 @@ fn emit_lesson_node(out: &mut String, lesson: &AgentFlowLessonNode) {
         meta_parts.push(format!("severity: \"{}\"", severity));
     }
     if let Some(context) = &lesson.metadata.context {
-        meta_parts.push(format!(
-            "context: \"{}\"",
-            context.replace('"', "\\\"")
-        ));
+        meta_parts.push(format!("context: \"{}\"", context.replace('"', "\\\"")));
     }
     if let Some(rule) = &lesson.metadata.rule {
         meta_parts.push(format!("rule: \"{}\"", rule.replace('"', "\\\"")));
@@ -1364,26 +1343,17 @@ fn emit_lesson_node(out: &mut String, lesson: &AgentFlowLessonNode) {
 /// Emit a test case as a testCase container.
 fn emit_test_case(out: &mut String, test: &AgentFlowTestCase) {
     let assertion_id = format!("{}_assertion", test.id);
-    out.push_str(&format!(
-        "\ntestCase {}[\"{}\"]\n",
-        test.id, test.label
-    ));
+    out.push_str(&format!("\ntestCase {}[\"{}\"]\n", test.id, test.label));
     out.push_str(&format!("  {}[\"assert\"]\n", assertion_id));
     out.push_str("end\n");
     out.push_str(&format!("{}@{{ shape: double-circle }}\n", assertion_id));
 
     let mut meta_parts = Vec::new();
     if let Some(assert_expr) = &test.metadata.assert_expr {
-        meta_parts.push(format!(
-            "assert: \"{}\"",
-            assert_expr.replace('"', "\\\"")
-        ));
+        meta_parts.push(format!("assert: \"{}\"", assert_expr.replace('"', "\\\"")));
     }
     if let Some(expects) = &test.metadata.expects {
-        meta_parts.push(format!(
-            "expects: \"{}\"",
-            expects.replace('"', "\\\"")
-        ));
+        meta_parts.push(format!("expects: \"{}\"", expects.replace('"', "\\\"")));
     }
     if !meta_parts.is_empty() {
         out.push_str(&format!("{}@{{\n", test.id));
@@ -1615,7 +1585,10 @@ mod tests {
             .filter(|e| e.to == "create_report" && e.from != "find_root_cause")
             .collect();
         assert_eq!(skip_edges.len(), 2);
-        let labels: Vec<_> = skip_edges.iter().filter_map(|e| e.label.as_deref()).collect();
+        let labels: Vec<_> = skip_edges
+            .iter()
+            .filter_map(|e| e.label.as_deref())
+            .collect();
         assert!(labels.contains(&"triage"));
         assert!(labels.contains(&"investigation"));
     }
@@ -1800,28 +1773,46 @@ mod tests {
         let mut graph = AgentFlowGraph::new("TB");
         graph.edges = vec![
             AgentFlowEdge {
-                from: "a".into(), to: "b".into(), label: None,
-                edge_type: EdgeType::OutputBinding, stroke: EdgeStroke::Normal,
+                from: "a".into(),
+                to: "b".into(),
+                label: None,
+                edge_type: EdgeType::OutputBinding,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
-                from: "c".into(), to: "d".into(), label: None,
-                edge_type: EdgeType::Error, stroke: EdgeStroke::Normal,
+                from: "c".into(),
+                to: "d".into(),
+                label: None,
+                edge_type: EdgeType::Error,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
-                from: "e".into(), to: "f".into(), label: None,
-                edge_type: EdgeType::Delegation, stroke: EdgeStroke::Normal,
+                from: "e".into(),
+                to: "f".into(),
+                label: None,
+                edge_type: EdgeType::Delegation,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
-                from: "g".into(), to: "h".into(), label: None,
-                edge_type: EdgeType::Association, stroke: EdgeStroke::Normal,
+                from: "g".into(),
+                to: "h".into(),
+                label: None,
+                edge_type: EdgeType::Association,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
-                from: "i".into(), to: "j".into(), label: None,
-                edge_type: EdgeType::Bidirectional, stroke: EdgeStroke::Normal,
+                from: "i".into(),
+                to: "j".into(),
+                label: None,
+                edge_type: EdgeType::Bidirectional,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
-                from: "k".into(), to: "l".into(), label: None,
-                edge_type: EdgeType::Pipeline, stroke: EdgeStroke::Thick,
+                from: "k".into(),
+                to: "l".into(),
+                label: None,
+                edge_type: EdgeType::Pipeline,
+                stroke: EdgeStroke::Thick,
             },
         ];
         // We need Program to call emit_agentflow_text, so use the graph directly.
@@ -1852,11 +1843,18 @@ mod tests {
         "#;
         let program = parse_program(src);
         let graph = pact_to_agentflow_graph(&program);
-        assert_eq!(graph.flows[0].params.get("topic"), Some(&"String".to_string()));
+        assert_eq!(
+            graph.flows[0].params.get("topic"),
+            Some(&"String".to_string())
+        );
         assert_eq!(graph.flows[0].returns.as_deref(), Some("String"));
 
         let text = pact_to_agentflow(&program);
-        assert!(text.contains("research@{"), "Flow deferred metadata missing:\n{}", text);
+        assert!(
+            text.contains("research@{"),
+            "Flow deferred metadata missing:\n{}",
+            text
+        );
         assert!(text.contains("params:"), "Flow params missing:\n{}", text);
         assert!(text.contains("returns:"), "Flow returns missing:\n{}", text);
     }
@@ -1898,7 +1896,10 @@ mod tests {
         );
         let graph = parsed.unwrap();
         assert_eq!(graph.direction, "TB");
-        assert!(!graph.agents.is_empty(), "No agents parsed from emitted text");
+        assert!(
+            !graph.agents.is_empty(),
+            "No agents parsed from emitted text"
+        );
     }
 
     #[test]
@@ -1940,7 +1941,11 @@ mod tests {
         });
         let program = parse_program("");
         let text = emit_agentflow_text(&graph, &program);
-        assert!(text.contains("type Status = Active | Inactive"), "Missing type alias in:\n{}", text);
+        assert!(
+            text.contains("type Status = Active | Inactive"),
+            "Missing type alias in:\n{}",
+            text
+        );
 
         let parsed = crate::agentflow_parse::parse_agentflow_text(&text).unwrap();
         assert_eq!(parsed.types.len(), 1);
