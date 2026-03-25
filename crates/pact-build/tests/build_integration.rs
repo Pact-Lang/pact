@@ -60,14 +60,8 @@ fn build_creates_complete_output_directory_structure() {
         tmp.path().join("agents").is_dir(),
         "agents/ directory missing"
     );
-    assert!(
-        tmp.path().join("tools").is_dir(),
-        "tools/ directory missing"
-    );
-    assert!(
-        tmp.path().join("flows").is_dir(),
-        "flows/ directory missing"
-    );
+    assert!(tmp.path().join("tools").is_dir(), "tools/ directory missing");
+    assert!(tmp.path().join("flows").is_dir(), "flows/ directory missing");
 
     // Verify specific files
     assert!(tmp.path().join("agents/greeter.toml").exists());
@@ -133,7 +127,10 @@ fn agent_toml_contains_correct_fields() {
         agent_toml.contains("fs.write"),
         "fs.write permission missing"
     );
-    assert!(agent_toml.contains("write_text"), "tool reference missing");
+    assert!(
+        agent_toml.contains("write_text"),
+        "tool reference missing"
+    );
 
     // Verify the tool TOML as well
     let tool_toml = std::fs::read_to_string(tmp.path().join("tools/write_text.toml")).unwrap();
@@ -168,7 +165,8 @@ fn agent_prompt_markdown_contains_guardrails() {
 
     build(&program, &config).unwrap();
 
-    let prompt = std::fs::read_to_string(tmp.path().join("agents/researcher.prompt.md")).unwrap();
+    let prompt =
+        std::fs::read_to_string(tmp.path().join("agents/researcher.prompt.md")).unwrap();
 
     // Agent header and user prompt
     assert!(prompt.contains("# Agent: researcher"));
@@ -244,7 +242,8 @@ fn claude_tools_json_has_proper_input_schema() {
 
     build(&program, &config).unwrap();
 
-    let json_str = std::fs::read_to_string(tmp.path().join("tools/claude_tools.json")).unwrap();
+    let json_str =
+        std::fs::read_to_string(tmp.path().join("tools/claude_tools.json")).unwrap();
     let tools: Vec<serde_json::Value> = serde_json::from_str(&json_str).unwrap();
 
     assert_eq!(tools.len(), 2);
@@ -252,7 +251,10 @@ fn claude_tools_json_has_proper_input_schema() {
     // Verify first tool (analyze)
     let analyze = &tools[0];
     assert_eq!(analyze["name"], "analyze");
-    assert_eq!(analyze["description"], "Analyze data for patterns.");
+    assert_eq!(
+        analyze["description"],
+        "Analyze data for patterns."
+    );
 
     let schema = &analyze["input_schema"];
     assert_eq!(schema["type"], "object");
@@ -313,7 +315,8 @@ fn guardrails_gdpr_triggered_by_personal_data_params() {
 
     build(&program, &config).unwrap();
 
-    let prompt = std::fs::read_to_string(tmp.path().join("agents/intake.prompt.md")).unwrap();
+    let prompt =
+        std::fs::read_to_string(tmp.path().join("agents/intake.prompt.md")).unwrap();
 
     // GDPR guardrails should be present due to personal data params
     assert!(
@@ -356,7 +359,8 @@ fn guardrails_hipaa_triggered_by_health_params() {
 
     build(&program, &config).unwrap();
 
-    let prompt = std::fs::read_to_string(tmp.path().join("agents/health_bot.prompt.md")).unwrap();
+    let prompt =
+        std::fs::read_to_string(tmp.path().join("agents/health_bot.prompt.md")).unwrap();
 
     // HIPAA guardrails should be present due to health-related params
     assert!(
@@ -538,11 +542,15 @@ fn website_builder_pact_builds_successfully() {
     assert!(manifest.contains("\"build_bilingual_site\""));
 
     // Verify Claude JSON contains all 4 tools with input_schema
-    let json_str = std::fs::read_to_string(tmp.path().join("tools/claude_tools.json")).unwrap();
+    let json_str =
+        std::fs::read_to_string(tmp.path().join("tools/claude_tools.json")).unwrap();
     let tools: Vec<serde_json::Value> = serde_json::from_str(&json_str).unwrap();
     assert_eq!(tools.len(), 4);
     for tool in &tools {
-        assert!(tool.get("name").is_some(), "tool missing name field");
+        assert!(
+            tool.get("name").is_some(),
+            "tool missing name field"
+        );
         assert!(
             tool.get("input_schema").is_some(),
             "tool missing input_schema"
@@ -580,7 +588,8 @@ fn website_builder_pact_builds_successfully() {
     assert!(flow_toml.contains("tool = \"generate_html\""));
 
     // Verify permissions TOML
-    let permissions = std::fs::read_to_string(tmp.path().join("permissions.toml")).unwrap();
+    let permissions =
+        std::fs::read_to_string(tmp.path().join("permissions.toml")).unwrap();
     assert!(permissions.contains("llm"));
     assert!(permissions.contains("net"));
 }
@@ -613,7 +622,8 @@ fn multiple_compliance_domains_detected_together() {
 
     build(&program, &config).unwrap();
 
-    let prompt = std::fs::read_to_string(tmp.path().join("agents/registrar.prompt.md")).unwrap();
+    let prompt =
+        std::fs::read_to_string(tmp.path().join("agents/registrar.prompt.md")).unwrap();
 
     // All three compliance domains should be detected
     assert!(
@@ -646,7 +656,8 @@ fn agent_with_no_tools_gets_no_tool_access_guardrail() {
 
     build(&program, &config).unwrap();
 
-    let prompt = std::fs::read_to_string(tmp.path().join("agents/bare.prompt.md")).unwrap();
+    let prompt =
+        std::fs::read_to_string(tmp.path().join("agents/bare.prompt.md")).unwrap();
 
     assert!(prompt.contains("No tool access"));
     assert!(prompt.contains("clearly state when you are uncertain"));
@@ -670,7 +681,8 @@ fn flow_toml_captures_all_steps_with_args() {
 
     build(&program, &config).unwrap();
 
-    let flow_toml = std::fs::read_to_string(tmp.path().join("flows/pipeline.toml")).unwrap();
+    let flow_toml =
+        std::fs::read_to_string(tmp.path().join("flows/pipeline.toml")).unwrap();
 
     assert!(flow_toml.contains("name = \"pipeline\""));
     assert!(flow_toml.contains("return_type = \"String\""));

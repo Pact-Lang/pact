@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 // ── Tool metadata ──────────────────────────────────────────────────────────
 
 /// Metadata carried by a tool node's `@{...}` block.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolMetadata {
     /// Human-readable description of the tool.
     pub description: String,
@@ -174,6 +174,55 @@ pub struct AgentFlowDirectiveNode {
     pub metadata: DirectiveMetadata,
 }
 
+// ── Lesson metadata ───────────────────────────────────────────────────────
+
+/// Metadata for a lesson node (learned operational knowledge).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LessonMetadata {
+    /// Context: what happened that prompted this lesson.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    /// Rule: what to do in similar situations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<String>,
+    /// Severity level (error, warning).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+}
+
+/// A lesson node (lin-doc shape).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowLessonNode {
+    pub id: String,
+    pub label: String,
+    pub shape: String,
+    pub metadata: LessonMetadata,
+}
+
+// ── Test metadata ─────────────────────────────────────────────────────────
+
+/// Metadata for a testCase container.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestMetadata {
+    /// Assertion expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assert_expr: Option<String>,
+    /// Human-readable expected behavior.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expects: Option<String>,
+}
+
+/// A test case container.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowTestCase {
+    pub id: String,
+    pub label: String,
+    /// Assertion node IDs inside the test.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assertions: Vec<String>,
+    pub metadata: TestMetadata,
+}
+
 // ── Agent & Bundle ─────────────────────────────────────────────────────────
 
 /// An agent container (subgraph) holding tool and skill nodes.
@@ -189,6 +238,9 @@ pub struct AgentFlowAgent {
     /// System prompt assigned to the agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    /// Permission capabilities granted to this agent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permits: Vec<String>,
     /// Memory backends configured for the agent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memory: Vec<String>,
@@ -220,11 +272,33 @@ pub struct AgentFlowBundle {
 #[serde(rename_all = "lowercase")]
 #[derive(Default)]
 pub enum EdgeType {
-    /// Execution-flow edge (solid arrow). This is the default.
+    /// Execution-flow edge (solid arrow `-->`). This is the default.
     #[default]
     Flow,
-    /// Structural reference edge (dashed arrow).
+    /// Structural reference edge (dashed arrow `-.->`).
     Reference,
+    /// Output binding edge (`--o`).
+    OutputBinding,
+    /// Error/cancel edge (`--x`).
+    Error,
+    /// Delegation edge (`-->>`).
+    Delegation,
+    /// Association edge (`---`).
+    Association,
+    /// Bidirectional edge (`o--o`).
+    Bidirectional,
+    /// Pipeline edge (`==>`).
+    Pipeline,
+}
+
+/// Edge stroke style.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum EdgeStroke {
+    #[default]
+    Normal,
+    Thick,
+    Dotted,
 }
 
 /// An edge connecting two nodes.
@@ -240,6 +314,62 @@ pub struct AgentFlowEdge {
     /// Whether this edge represents execution flow or a structural reference.
     #[serde(default, rename = "type")]
     pub edge_type: EdgeType,
+    /// Stroke style for the edge line.
+    #[serde(default, skip_serializing_if = "is_default_stroke")]
+    pub stroke: EdgeStroke,
+}
+
+fn is_default_stroke(s: &EdgeStroke) -> bool {
+    *s == EdgeStroke::Normal
+}
+
+/// The kind of container block.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContainerKind {
+    Agent,
+    Flow,
+    Task,
+    Subgraph,
+    Skill,
+    Directive,
+    TestCase,
+}
+
+/// A first-class type declaration in agentflow.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowTypeDecl {
+    /// Type name.
+    pub name: String,
+    /// The kind of type declaration.
+    pub kind: TypeDeclKind,
+}
+
+/// Variants of type declarations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum TypeDeclKind {
+    /// Opaque type with no visible structure.
+    Opaque,
+    /// Type alias: `type Foo = Bar`
+    Alias { target: String },
+    /// Record type: `type Foo = Record { field: Type, ... }`
+    Record { fields: BTreeMap<String, String> },
+}
+
+/// A task block inside a flow container.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentFlowTask {
+    /// Task identifier.
+    pub id: String,
+    /// Display label.
+    pub label: String,
+    /// Node IDs contained in this task.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nodes: Vec<String>,
+    /// Edges within this task.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edges: Vec<AgentFlowEdge>,
 }
 
 // ── Top-level graph ────────────────────────────────────────────────────────
@@ -266,14 +396,23 @@ pub struct AgentFlowGraph {
     /// Agent bundles grouping multiple agents.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bundles: Vec<AgentFlowBundle>,
+    /// Lesson nodes (lin-doc shape with operational knowledge).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lessons: Vec<AgentFlowLessonNode>,
+    /// Test case containers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tests: Vec<AgentFlowTestCase>,
     /// All edges (flow and reference) in the graph.
     pub edges: Vec<AgentFlowEdge>,
     /// Flow definitions with their steps.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub flows: Vec<AgentFlowDef>,
-    /// Type alias declarations (union types).
+    /// Type alias declarations (union types). Kept for backward compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_aliases: Vec<AgentFlowTypeAlias>,
+    /// First-class type declarations (records, aliases, opaques).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<AgentFlowTypeDecl>,
 }
 
 /// A flow definition containing ordered steps.
@@ -283,6 +422,15 @@ pub struct AgentFlowDef {
     pub name: String,
     /// Ordered steps in the flow.
     pub steps: Vec<AgentFlowStep>,
+    /// Named parameters for this flow.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub params: BTreeMap<String, String>,
+    /// Return type of this flow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns: Option<String>,
+    /// Task blocks within this flow.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tasks: Vec<AgentFlowTask>,
 }
 
 /// A single step in a flow: an agent dispatching a tool, producing an output.
@@ -318,9 +466,12 @@ impl AgentFlowGraph {
             directives: Vec::new(),
             agents: Vec::new(),
             bundles: Vec::new(),
+            lessons: Vec::new(),
+            tests: Vec::new(),
             edges: Vec::new(),
             flows: Vec::new(),
             type_aliases: Vec::new(),
+            types: Vec::new(),
         }
     }
 }
@@ -373,8 +524,47 @@ mod tests {
             to: "b".to_string(),
             label: None,
             edge_type: EdgeType::Reference,
+            stroke: EdgeStroke::Normal,
         };
         let json = serde_json::to_string(&edge).unwrap();
         assert!(json.contains("\"type\":\"reference\""));
+    }
+
+    #[test]
+    fn new_edge_types_serde() {
+        for (et, expected) in [
+            (EdgeType::OutputBinding, "outputbinding"),
+            (EdgeType::Error, "error"),
+            (EdgeType::Delegation, "delegation"),
+            (EdgeType::Association, "association"),
+            (EdgeType::Bidirectional, "bidirectional"),
+            (EdgeType::Pipeline, "pipeline"),
+        ] {
+            let edge = AgentFlowEdge {
+                from: "a".into(),
+                to: "b".into(),
+                label: None,
+                edge_type: et,
+                stroke: EdgeStroke::Normal,
+            };
+            let json = serde_json::to_string(&edge).unwrap();
+            assert!(json.contains(expected), "expected {} in {}", expected, json);
+        }
+    }
+
+    #[test]
+    fn type_decl_serde_roundtrip() {
+        let decl = AgentFlowTypeDecl {
+            name: "Report".into(),
+            kind: TypeDeclKind::Record {
+                fields: BTreeMap::from([
+                    ("title".into(), "String".into()),
+                    ("body".into(), "String".into()),
+                ]),
+            },
+        };
+        let json = serde_json::to_string(&decl).unwrap();
+        let back: AgentFlowTypeDecl = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "Report");
     }
 }

@@ -73,6 +73,11 @@ pub enum SymbolKind {
         /// Logical name of the MCP server.
         name: String,
     },
+    /// A lesson declaration with optional severity.
+    Lesson {
+        /// Severity level if specified.
+        severity: Option<String>,
+    },
 }
 
 /// The symbol table for a PACT program.

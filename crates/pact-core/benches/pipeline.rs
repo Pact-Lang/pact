@@ -102,9 +102,7 @@ fn bench_full_pipeline(c: &mut Criterion) {
 
     c.bench_function("pipeline/lex_parse_check", |b| {
         b.iter(|| {
-            let tokens = Lexer::new(black_box(WEBSITE_BUILDER_SRC), id)
-                .lex()
-                .unwrap();
+            let tokens = Lexer::new(black_box(WEBSITE_BUILDER_SRC), id).lex().unwrap();
             let program = Parser::new(&tokens).parse().unwrap();
             Checker::new().check(&program)
         });

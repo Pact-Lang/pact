@@ -80,6 +80,18 @@ enum Command {
         /// Watch for changes and re-build automatically.
         #[arg(long)]
         watch: bool,
+
+        /// Generate Claude Code custom skill files (.claude/skills/).
+        #[arg(long)]
+        claude_skill: bool,
+
+        /// Generate a CLAUDE.md process memory file.
+        #[arg(long)]
+        claude_md: bool,
+
+        /// Generate MCP server recommendations.
+        #[arg(long)]
+        recommend_mcp: bool,
     },
 
     /// Execute a flow from a .pact file.
@@ -114,6 +126,10 @@ enum Command {
         /// Maximum total API calls across all agents.
         #[arg(long, default_value = "1000")]
         max_global_calls: u64,
+
+        /// Output file path for the run report (supports .html).
+        #[arg(long, short)]
+        output: Option<String>,
     },
 
     /// Run all test declarations in a .pact file.
@@ -231,7 +247,10 @@ fn main() -> Result<()> {
             out_dir,
             target,
             watch,
-        } => cmd_build(&file, &out_dir, &target, watch),
+            claude_skill,
+            claude_md,
+            recommend_mcp,
+        } => cmd_build(&file, &out_dir, &target, watch, claude_skill, claude_md, recommend_mcp),
         Command::Run {
             file,
             flow,
@@ -241,6 +260,7 @@ fn main() -> Result<()> {
             max_calls,
             max_tokens,
             max_global_calls,
+            output,
         } => cmd_run(
             &file,
             &flow,
@@ -250,6 +270,7 @@ fn main() -> Result<()> {
             max_calls,
             max_tokens,
             max_global_calls,
+            output.as_deref(),
         ),
         Command::Test { file } => cmd_test(&file),
         Command::FromMermaid { file, output } => cmd_from_mermaid(&file, output.as_deref()),
@@ -554,13 +575,24 @@ fn cmd_check(path: &str, watch: bool) -> Result<()> {
 }
 
 /// `pact build <file>` — compile to output artifacts.
-fn cmd_build(path: &str, out_dir: &str, target_str: &str, watch: bool) -> Result<()> {
+fn cmd_build(
+    path: &str,
+    out_dir: &str,
+    target_str: &str,
+    watch: bool,
+    claude_skill: bool,
+    claude_md: bool,
+    recommend_mcp: bool,
+) -> Result<()> {
     let (program, _sm) = load_and_check(path)?;
 
     let target = Target::parse(target_str)
         .ok_or_else(|| miette::miette!("unknown target '{}'. Supported: claude", target_str))?;
 
-    let config = BuildConfig::new(path, out_dir, target);
+    let mut config = BuildConfig::new(path, out_dir, target);
+    config.emit_claude_skill = claude_skill;
+    config.emit_claude_md = claude_md;
+    config.emit_mcp_recommendations = recommend_mcp;
 
     pact_build::build(&program, &config)
         .into_diagnostic()
@@ -584,7 +616,10 @@ fn cmd_build(path: &str, out_dir: &str, target_str: &str, watch: bool) -> Result
                         return;
                     }
                 };
-                let config = BuildConfig::new(&path_owned, &out_dir_owned, target);
+                let mut config = BuildConfig::new(&path_owned, &out_dir_owned, target);
+                config.emit_claude_skill = claude_skill;
+                config.emit_claude_md = claude_md;
+                config.emit_mcp_recommendations = recommend_mcp;
                 match pact_build::build(&program, &config) {
                     Ok(()) => {
                         println!("Built to '{out_dir_owned}/' (target: {target_str_owned})");
@@ -630,6 +665,7 @@ fn cmd_run(
     max_calls: u64,
     max_tokens: u64,
     max_global_calls: u64,
+    output: Option<&str>,
 ) -> Result<()> {
     let (program, _sm) = load_and_check(path)?;
 
@@ -684,13 +720,288 @@ fn cmd_run(
         }
     };
 
+    let start = std::time::Instant::now();
     match interpreter.run(&program, flow_name, arg_values) {
         Ok(result) => {
+            let elapsed = start.elapsed();
             println!("\n=> {result}");
+
+            if let Some(out_path) = output {
+                write_html_report(out_path, path, flow_name, dispatch, elapsed, &result)?;
+                println!("Report written to '{out_path}'");
+            }
+
             Ok(())
         }
         Err(e) => Err(miette::miette!("{e}")),
     }
+}
+
+/// Write an HTML report for a completed flow run.
+fn write_html_report(
+    out_path: &str,
+    source_path: &str,
+    flow_name: &str,
+    dispatch: &str,
+    elapsed: std::time::Duration,
+    result: &Value,
+) -> Result<()> {
+    let result_text = format!("{result}");
+
+    // Parse the result into sections if it follows template output format (===SECTION===)
+    let sections = parse_template_sections(&result_text);
+
+    let source_name = std::path::Path::new(source_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| source_path.to_string());
+
+    let elapsed_secs = elapsed.as_secs_f64();
+
+    let mut sections_html = String::new();
+    if sections.is_empty() {
+        // Plain text result
+        sections_html.push_str(&format!(
+            r#"<div class="section"><div class="section-title">Result</div><div class="section-body"><pre>{}</pre></div></div>"#,
+            html_escape(&result_text)
+        ));
+    } else {
+        for (title, entries) in &sections {
+            sections_html.push_str(&format!(
+                r#"<div class="section"><div class="section-title">{}</div><div class="section-body">"#,
+                html_escape(title)
+            ));
+            for entry in entries {
+                let (label, value) = entry
+                    .split_once(": ")
+                    .unwrap_or(("", entry));
+                if label.is_empty() {
+                    sections_html.push_str(&format!(
+                        "<p>{}</p>",
+                        html_escape(value)
+                    ));
+                } else {
+                    sections_html.push_str(&format!(
+                        r#"<div class="entry"><span class="entry-label">{}</span> <span class="entry-value">{}</span></div>"#,
+                        html_escape(label),
+                        html_escape(value)
+                    ));
+                }
+            }
+            sections_html.push_str("</div></div>");
+        }
+    }
+
+    let html = format!(
+        r##"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PACT Run Report — {flow_name}</title>
+<style>
+  :root {{
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+  }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+  }}
+  .container {{ max-width: 900px; margin: 0 auto; }}
+  .header {{
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+  }}
+  .header h1 {{
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 0.25rem;
+  }}
+  .header .subtitle {{
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }}
+  .meta {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }}
+  .meta-card {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+  }}
+  .meta-card .label {{
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+  }}
+  .meta-card .value {{
+    font-size: 1.1rem;
+    font-weight: 600;
+  }}
+  .meta-card .value.dispatch {{ color: var(--purple); }}
+  .meta-card .value.time {{ color: var(--green); }}
+  .section {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+  }}
+  .section-title {{
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.75rem 1.25rem;
+    background: rgba(88, 166, 255, 0.08);
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+  }}
+  .section-body {{
+    padding: 1.25rem;
+  }}
+  .section-body pre {{
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }}
+  .entry {{
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+  }}
+  .entry:last-child {{ border-bottom: none; }}
+  .entry-label {{
+    font-weight: 600;
+    color: var(--orange);
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.8rem;
+  }}
+  .entry-value {{
+    color: var(--text);
+  }}
+  .section-body p {{
+    padding: 0.5rem 0;
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }}
+  .footer {{
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: center;
+  }}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>PACT Run Report</h1>
+    <div class="subtitle">Flow execution output for <code>{source_name}</code></div>
+  </div>
+  <div class="meta">
+    <div class="meta-card">
+      <div class="label">Flow</div>
+      <div class="value">{flow_name}</div>
+    </div>
+    <div class="meta-card">
+      <div class="label">Dispatch</div>
+      <div class="value dispatch">{dispatch}</div>
+    </div>
+    <div class="meta-card">
+      <div class="label">Duration</div>
+      <div class="value time">{elapsed_secs:.1}s</div>
+    </div>
+    <div class="meta-card">
+      <div class="label">Source</div>
+      <div class="value">{source_name}</div>
+    </div>
+  </div>
+  {sections_html}
+  <div class="footer">
+    Generated by PACT — Programmable Agent Contract Toolkit
+  </div>
+</div>
+</body>
+</html>"##,
+    );
+
+    fs::write(out_path, html)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("failed to write report to '{out_path}'"))?;
+
+    Ok(())
+}
+
+/// Parse template-style output into sections.
+/// Recognizes `===SECTION_NAME===` headers followed by `KEY: value` lines.
+fn parse_template_sections(text: &str) -> Vec<(String, Vec<String>)> {
+    let mut sections = Vec::new();
+    let mut current_title: Option<String> = None;
+    let mut current_entries: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("===") && trimmed.ends_with("===") && trimmed.len() > 6 {
+            // Flush previous section
+            if let Some(title) = current_title.take() {
+                sections.push((title, std::mem::take(&mut current_entries)));
+            }
+            let title = trimmed
+                .trim_start_matches('=')
+                .trim_end_matches('=')
+                .trim()
+                .to_string();
+            current_title = Some(title);
+        } else if !trimmed.is_empty() {
+            if current_title.is_some() {
+                current_entries.push(trimmed.to_string());
+            } else {
+                // Lines before any section header — create an implicit section
+                current_title = Some("Output".to_string());
+                current_entries.push(trimmed.to_string());
+            }
+        }
+    }
+
+    // Flush last section
+    if let Some(title) = current_title {
+        sections.push((title, current_entries));
+    }
+
+    sections
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// Execute a flow with streaming output from the Claude API.
@@ -917,7 +1228,8 @@ fn cmd_list_declarations(path: &str) -> Result<()> {
             DeclKind::Template(_) => {}   // Listed separately if needed
             DeclKind::Directive(_) => {}  // Listed separately if needed
             DeclKind::Import(_) => {}     // Resolved by loader
-            DeclKind::Connect(_) => {}    // MCP connections
+            DeclKind::Connect(_) => {}   // MCP connections
+            DeclKind::Lesson(_) => {}    // Lessons are process memory
         }
     }
 
@@ -1163,10 +1475,7 @@ fn cmd_mcp_list_tools(server: &str, path: &str) -> Result<()> {
     let command = if let Some(cmd) = transport.strip_prefix("stdio ") {
         cmd
     } else {
-        miette::bail!(
-            "only stdio transport is currently supported (got: {})",
-            transport
-        );
+        miette::bail!("only stdio transport is currently supported (got: {})", transport);
     };
 
     // Connect and list tools
@@ -1178,10 +1487,7 @@ fn cmd_mcp_list_tools(server: &str, path: &str) -> Result<()> {
         let mut conn = pact_dispatch::mcp_client::McpConnection::connect_stdio(server, command)
             .await
             .map_err(|e| miette::miette!("{}", e))?;
-        let tools = conn
-            .list_tools()
-            .await
-            .map_err(|e| miette::miette!("{}", e))?;
+        let tools = conn.list_tools().await.map_err(|e| miette::miette!("{}", e))?;
         Ok::<Vec<pact_dispatch::mcp_client::McpToolInfo>, miette::Report>(tools.to_vec())
     })?;
 
@@ -1543,6 +1849,7 @@ fn playground_list_decls(decls: &[Decl]) {
             DeclKind::Directive(_) => {} // Directives are structural
             DeclKind::Import(_) => {}    // Resolved by loader
             DeclKind::Connect(_) => {}   // MCP connections are structural
+            DeclKind::Lesson(_) => {}    // Lessons are process memory
         }
     }
 
@@ -1694,6 +2001,7 @@ fn playground_eval(
                     let names: Vec<_> = c.servers.iter().map(|s| s.name.as_str()).collect();
                     println!("Defined connect block ({})", names.join(", "));
                 }
+                DeclKind::Lesson(l) => println!("Defined lesson \"{}\"", l.name),
             }
         }
 

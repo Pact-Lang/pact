@@ -59,6 +59,12 @@ pub mod executor;
 pub mod mcp_client;
 /// Runtime compliance mediation and permission enforcement.
 pub mod mediation;
+/// Observation capture for agent memory (SQLite-backed).
+pub mod observation_store;
+/// TF-IDF semantic search over observations.
+pub mod search;
+/// Session summarization for agent memory.
+pub mod summarizer;
 /// Ollama local model dispatcher.
 pub mod ollama;
 /// OpenAI Chat Completions dispatcher.

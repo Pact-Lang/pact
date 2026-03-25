@@ -154,6 +154,17 @@ pub enum DeclKind {
     /// }
     /// ```
     Connect(ConnectDecl),
+
+    /// A lesson declaration — formalized operational knowledge.
+    ///
+    /// ```pact
+    /// lesson "cache_invalidation" {
+    ///     context: <<After deploy, cache was stale for 10 minutes>>
+    ///     rule: <<Always invalidate CDN cache after deploy>>
+    ///     severity: warning
+    /// }
+    /// ```
+    Lesson(LessonDecl),
 }
 
 /// Directive declaration — reusable prompt block with optional parameters.
@@ -204,6 +215,20 @@ pub struct ConnectEntry {
 pub struct ConnectDecl {
     /// The MCP server entries declared in this block.
     pub servers: Vec<ConnectEntry>,
+}
+
+/// Lesson declaration — formalized operational knowledge.
+/// Captures context, rules, and severity for process memory.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LessonDecl {
+    /// Lesson name (a string identifier).
+    pub name: String,
+    /// When/why this lesson was learned.
+    pub context: Option<String>,
+    /// The guideline or rule.
+    pub rule: Option<String>,
+    /// Severity level: "info", "warning", or "error".
+    pub severity: Option<String>,
 }
 
 /// Template declaration — reusable output format specification.

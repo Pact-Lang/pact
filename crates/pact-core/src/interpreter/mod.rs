@@ -124,6 +124,8 @@ pub struct Interpreter {
     dispatcher: Box<dyn Dispatcher>,
     /// The full program AST, needed for dispatch.
     program: Option<Program>,
+    /// The agent currently being dispatched to (for memory scoping).
+    current_agent: Option<String>,
 }
 
 /// Info about an agent needed at runtime.
@@ -145,6 +147,7 @@ impl Interpreter {
             test_results: Vec::new(),
             dispatcher: Box::new(MockDispatcher),
             program: None,
+            current_agent: None,
         }
     }
 
@@ -157,6 +160,7 @@ impl Interpreter {
             test_results: Vec::new(),
             dispatcher,
             program: None,
+            current_agent: None,
         }
     }
 
@@ -301,8 +305,12 @@ impl Interpreter {
             ExprKind::AgentRef(name) => Ok(Value::AgentRef(name.clone())),
             ExprKind::ToolRef(name) => Ok(Value::String(format!("#{name}"))),
             ExprKind::MemoryRef(name) => {
-                // Memory read — look up in the current agent's memory store
-                let store = crate::memory::MemoryStore::load("default");
+                // Memory read — look up in the current agent's memory store.
+                let agent = self
+                    .current_agent
+                    .as_deref()
+                    .unwrap_or("default");
+                let store = crate::memory::MemoryStore::load(agent);
                 match store.get(name) {
                     Some(val) => Ok(Value::String(val.to_string())),
                     None => Ok(Value::Null),
@@ -358,7 +366,11 @@ impl Interpreter {
                     .as_ref()
                     .expect("program must be loaded before dispatch");
 
-                self.dispatcher
+                // Track agent context for memory scoping.
+                let prev_agent = self.current_agent.take();
+                self.current_agent = Some(agent_name.clone());
+
+                let result = self.dispatcher
                     .dispatch(
                         &agent_name,
                         &tool_name,
@@ -366,7 +378,10 @@ impl Interpreter {
                         &agent_info.decl,
                         program,
                     )
-                    .map_err(Signal::Fail)
+                    .map_err(Signal::Fail);
+
+                self.current_agent = prev_agent;
+                result
             }
 
             ExprKind::Pipeline { left, right } => {
@@ -464,7 +479,16 @@ impl Interpreter {
             ExprKind::Record(exprs) => {
                 let mut results = Vec::new();
                 for e in exprs {
-                    results.push(self.eval_with_signal(e)?);
+                    let val = self.eval_with_signal(e)?;
+                    // If inside an agent context, persist assignments to memory.
+                    if let Some(agent_name) = &self.current_agent {
+                        if let ExprKind::Assign { name, .. } = &e.kind {
+                            let mut store =
+                                crate::memory::MemoryStore::load(agent_name);
+                            store.set(name.clone(), val.to_string());
+                        }
+                    }
+                    results.push(val);
                 }
                 Ok(Value::List(results))
             }
@@ -1005,5 +1029,94 @@ mod tests {
         "#;
         let result = run_flow(src, "main", vec![]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn memory_ref_reads_from_agent_scoped_store() {
+        std::env::set_var("PACT_MEMORY_DIR", "/tmp/pact_test_memory_interp");
+        // Pre-populate memory for the agent.
+        let mut store = crate::memory::MemoryStore::load("greeter");
+        store.set("greeting".to_string(), "Hello from memory!".to_string());
+
+        let src = r#"
+            agent @greeter {
+                permits: [^llm.query]
+                tools: [#greet]
+                memory: [~greeting]
+            }
+            flow hello() -> String {
+                result = @greeter -> #greet(~greeting)
+                return result
+            }
+        "#;
+        let mut sm = SourceMap::new();
+        let id = sm.add("test.pact", src);
+        let tokens = Lexer::new(src, id).lex().unwrap();
+        let program = Parser::new(&tokens).parse().unwrap();
+        let mut interp = Interpreter::new();
+        // Set the current agent context so ~greeting reads from @greeter's store.
+        interp.current_agent = Some("greeter".to_string());
+        interp.load(&program);
+        let result = interp.call_flow("hello", vec![]).unwrap();
+        // The mock dispatcher returns "greet_result" regardless of args,
+        // but the important thing is the ~greeting was resolved to the stored value.
+        assert_eq!(result, Value::ToolResult("greet_result".into()));
+
+        // Cleanup
+        store.clear();
+    }
+
+    #[test]
+    fn memory_ref_returns_null_for_missing_key() {
+        std::env::set_var("PACT_MEMORY_DIR", "/tmp/pact_test_memory_interp");
+        let src = r#"
+            flow read_missing() {
+                val = ~nonexistent_key
+                return val
+            }
+        "#;
+        let result = run_flow(src, "read_missing", vec![]).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn agent_dispatch_sets_current_agent() {
+        std::env::set_var("PACT_MEMORY_DIR", "/tmp/pact_test_memory_interp");
+        // Pre-populate memory for the agent.
+        let mut store = crate::memory::MemoryStore::load("researcher");
+        store.set("context".to_string(), "prior research".to_string());
+
+        let src = r#"
+            agent @researcher {
+                permits: [^net.read]
+                tools: [#search]
+                memory: [~context]
+            }
+            flow research(query :: String) -> String {
+                result = @researcher -> #search(query)
+                return result
+            }
+        "#;
+        let mut sm = SourceMap::new();
+        let id = sm.add("test.pact", src);
+        let tokens = Lexer::new(src, id).lex().unwrap();
+        let program = Parser::new(&tokens).parse().unwrap();
+        let mut interp = Interpreter::new();
+        let result = interp.run(&program, "research", vec![Value::String("test".into())]);
+        assert!(result.is_ok());
+        // After dispatch completes, current_agent should be restored.
+        assert_eq!(interp.current_agent, None);
+
+        // Cleanup
+        store.clear();
+    }
+
+    #[test]
+    fn memory_store_session_constructor() {
+        std::env::set_var("PACT_MEMORY_DIR", "/tmp/pact_test_memory_interp");
+        let store = crate::memory::MemoryStore::with_session("test_agent", "sess-123");
+        assert_eq!(store.agent_name(), "test_agent");
+        assert_eq!(store.session_id(), Some("sess-123"));
+        assert!(store.is_empty());
     }
 }

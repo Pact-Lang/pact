@@ -195,10 +195,7 @@ impl AuditLogger {
 
     /// Record an audit entry.
     pub fn log(&self, entry: AuditEntry) {
-        self.entries
-            .lock()
-            .expect("audit lock poisoned")
-            .push(entry);
+        self.entries.lock().expect("audit lock poisoned").push(entry);
     }
 
     /// Return a snapshot of all recorded entries.
@@ -324,7 +321,8 @@ fn days_to_ymd(days: u64) -> (i64, u32, u32) {
     let z = days as i64 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
     let doe = (z - era * 146097) as u64; // day of era [0, 146096]
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era [0, 399]
+    let yoe =
+        (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365; // year of era [0, 399]
     let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // day of year [0, 365]
     let mp = (5 * doy + 2) / 153; // [0, 11]
@@ -369,9 +367,7 @@ mod tests {
 
         let alpha = logger.entries_for_agent("alpha");
         assert_eq!(alpha.len(), 2);
-        assert!(alpha
-            .iter()
-            .all(|e| e.agent_name.as_deref() == Some("alpha")));
+        assert!(alpha.iter().all(|e| e.agent_name.as_deref() == Some("alpha")));
     }
 
     #[test]

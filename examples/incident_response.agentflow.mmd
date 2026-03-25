@@ -1,124 +1,6 @@
 agentflow LR
-  type Incident = Record {
-    id: String
-    region: String
-    services: List<String>
-    severity: String
-    start_time: String
-    status: String
-    title: String
-  }
 
-  type Finding = Record {
-    category: String
-    confidence: String
-    evidence: String
-    recommendation: String
-  }
-
-  type HealthCheck = Record {
-    error_rate_pct: Float
-    latency_p99_ms: Int
-    region: String
-    service: String
-    status: String
-  }
-
-  type Severity = P0 | P1 | P2 | P3 | P4
-  type IncidentStatus = Detected | Triaged | Investigating | Mitigating | Resolved | PostMortem
-
-  %% template triage_result: AFFECTED_SERVICES, BLAST_RADIUS, ESCALATION, INCIDENT_ID, INITIAL_HYPOTHESIS, SEVERITY, TIMELINE, TITLE
-  %% template investigation_report: ANOMALY, CORRELATION, DEPENDENCY_MAP, EVIDENCE, METRICS_ANALYSIS, SUMMARY
-  %% template runbook_format: COMMUNICATION, ESCALATION_PATH, OBJECTIVE, PREREQUISITES, STEP, VERIFICATION
-
-  %% directive incident_dashboard_style
-
-  poll_health@{
-    toolDefinition: true
-    shape: subroutine
-    description: "Poll service health endpoints for a given region. Returns a JSON array of health check results for all monitored services. MOCK DATA — return this exact JSON for any region query:
-[
-  {\"service\": \"api-gateway\", \"status\": \"DEGRADED\", \"latency_p99_ms\": 12000, \"error_rate_pct\": 34.2, \"region\": \"us-east-1\", \"timestamp\": \"2026-03-18T14:23:00Z\"},
-  {\"service\": \"payment-service\", \"status\": \"DEGRADED\", \"latency_p99_ms\": 8500, \"error_rate_pct\": 28.7, \"region\": \"us-east-1\", \"timestamp\": \"2026-03-18T14:23:05Z\"},
-  {\"service\": \"user-service\", \"status\": \"DEGRADED\", \"latency_p99_ms\": 6200, \"error_rate_pct\": 19.1, \"region\": \"us-east-1\", \"timestamp\": \"2026-03-18T14:23:03Z\"},
-  {\"service\": \"order-service\", \"status\": \"HEALTHY\", \"latency_p99_ms\": 120, \"error_rate_pct\": 0.3, \"region\": \"us-east-1\", \"timestamp\": \"2026-03-18T14:23:00Z\"},
-  {\"service\": \"inventory-service\", \"status\": \"HEALTHY\", \"latency_p99_ms\": 85, \"error_rate_pct\": 0.1, \"region\": \"us-east-1\", \"timestamp\": \"2026-03-18T14:23:00Z\"}
-]
-Return this JSON exactly — do not modify or summarize it."
-    requires: "llm.query"
-    params:
-      region: String
-    returns: "String"
-  }
-
-  detect_anomaly@{
-    toolDefinition: true
-    shape: subroutine
-    description: "You are an observability engineer analyzing raw health check data. Given JSON health-check results from multiple services, determine if there is an active incident. Compare each metric against normal baselines: p99 latency should be under 500ms, error rates should be under 2%, all services should report HEALTHY. If you detect anomalies, produce a single CRITICAL/WARNING/INFO alert string that summarizes ALL anomalies found — include specific service names, metric values, affected region, and timestamp. If everything looks normal, respond with just the word HEALTHY. Be precise and quantitative."
-    requires: "llm.query"
-    params:
-      health_data: String
-    returns: "String"
-  }
-
-  triage_alert@{
-    toolDefinition: true
-    shape: subroutine
-    description: "You are an SRE triage specialist. Analyze a raw production alert and produce a structured triage assessment. Assign a severity level (P0-P4) based on user impact, blast radius, and revenue exposure. Identify affected services, generate a timeline from the alert signals, form an initial hypothesis, and recommend an escalation path. Be specific — reference actual service names, error codes, and metrics from the alert. Output must follow the triage_result template exactly."
-    requires: "llm.query"
-    output: "%triage_result"
-    params:
-      alert: String
-    returns: "String"
-  }
-
-  analyze_incident@{
-    toolDefinition: true
-    shape: subroutine
-    description: "You are a senior site reliability engineer performing deep incident investigation. Given a triage assessment, conduct a thorough analysis: examine the metrics patterns (latency percentiles, error rate curves, throughput drops), map service dependencies to identify cascade paths, find anomalies across the timeline, and correlate signals across services. Look for the failure propagation path — which service failed first and how it cascaded. Be quantitative: cite specific numbers, percentages, and timestamps. Output must follow the investigation_report template exactly."
-    requires: "llm.query"
-    output: "%investigation_report"
-    params:
-      triage: String
-    returns: "String"
-  }
-
-  root_cause_analysis@{
-    toolDefinition: true
-    shape: subroutine
-    description: "You are a principal engineer specializing in distributed systems failure analysis. Given the investigation report, determine the root cause with high confidence. Consider: recent deployments, configuration changes, infrastructure failures, capacity limits, dependency outages, and data corruption. Produce a clear causal chain from trigger to user impact. Distinguish between the root cause (why it happened), the trigger (what started it), and contributing factors (what made it worse). Cite specific evidence from the investigation for each conclusion. Format as a structured analysis with sections: Root Cause, Trigger Event, Contributing Factors, Causal Chain, and Confidence Assessment."
-    requires: "llm.query"
-    params:
-      investigation: String
-    returns: "String"
-  }
-
-  generate_runbook@{
-    toolDefinition: true
-    shape: subroutine
-    description: "You are an incident commander generating an actionable response runbook. Given the root cause analysis, produce step-by-step mitigation procedures. Each step must include: the specific action, exact commands or procedures (using realistic kubectl, AWS CLI, or service-specific commands), expected outcome, and rollback procedure if the step makes things worse. Include verification checks after each major step. Add a stakeholder communication template and escalation criteria. Be concrete — no vague instructions like 'investigate further'. Every step should be copy-pasteable by an on-call engineer at 3 AM. IMPORTANT: Never include long numeric strings (13+ digits) in your output — use short placeholder IDs like 'abc-1234' instead of realistic account numbers or resource IDs. Output must follow the runbook_format template exactly."
-    requires: "llm.query"
-    output: "%runbook_format"
-    params:
-      root_cause: String
-    returns: "String"
-  }
-
-  create_report@{
-    toolDefinition: true
-    shape: subroutine
-    description: "You are a frontend engineer building an incident dashboard. Generate a complete, single-file HTML page that serves as a real-time incident report dashboard. Combine ALL previous pipeline outputs (triage, investigation, root cause, runbook) into a cohesive, data-dense dark-mode dashboard. Include: severity banner with pulsing SVG indicator, incident timeline with timestamps, metrics visualization using CSS bar charts, dependency graph using inline SVG, root cause causal chain, runbook steps with expandable sections, and a status footer. IMPORTANT: Never include long numeric strings (13+ digits) anywhere — use short IDs like 'INC-0318-001'. Return ONLY raw HTML starting with DOCTYPE. No markdown fences. No explanations. The dashboard should look like it belongs in a real SRE war room."
-    requires: "llm.query"
-    directives: "%incident_dashboard_style"
-    params:
-      investigation: String
-      root_cause: String
-      runbook: String
-      triage: String
-    returns: "String"
-  }
-
-  agent incident_team["Incident Team"]
+agent incident_team["Incident Team"]
 
     sentinel@{
       agentDefinition: true
@@ -160,37 +42,70 @@ Return this JSON exactly — do not modify or summarize it."
       prompt: "You are a frontend engineer who specializes in operational dashboards. You build data-dense, scannable interfaces that SRE teams rely on during incidents. Your HTML/CSS is production-quality — proper semantic markup, CSS Grid layouts, responsive design, smooth animations. You use inline SVG for status indicators and data visualization. Every pixel serves a purpose. Never output markdown — only raw HTML starting with DOCTYPE."
     }
   end
+  incident_team@{
+    view: collapsed
+  }
 
-  flow respond
-    task Step1
-      direction TB
-      a_monitor{{monitor}}@{ agent: monitor } --- triage_alert@{ shape: subroutine }
-      a_monitor --o triage@{ shape: doc }
-    end
+type Incident = Record {
+    id: String
+    region: String
+    services: List<String>
+    severity: String
+    start_time: String
+    status: String
+    title: String
+  }
 
-    task Step2
-      direction TB
-      a_investigator{{investigator}}@{ agent: investigator } --- analyze_incident@{ shape: subroutine }
-      a_investigator --o investigation@{ shape: doc }
-    end
+type Finding = Record {
+    category: String
+    confidence: String
+    evidence: String
+    recommendation: String
+  }
 
-    task Step3
-      direction TB
-      a_investigator{{investigator}}@{ agent: investigator } --- root_cause_analysis@{ shape: subroutine }
-      a_investigator --o root_cause@{ shape: doc }
-    end
+type HealthCheck = Record {
+    error_rate_pct: Float
+    latency_p99_ms: Int
+    region: String
+    service: String
+    status: String
+  }
 
-    task Step4
-      direction TB
-      a_responder{{responder}}@{ agent: responder } --- generate_runbook@{ shape: subroutine }
-      a_responder --o runbook@{ shape: doc }
-    end
+  type Severity = P0 | P1 | P2 | P3 | P4
+  type IncidentStatus = Detected | Triaged | Investigating | Mitigating | Resolved | PostMortem
 
-    task Step5
+
+flow respond["Respond"]
       direction TB
-      a_reporter{{reporter}}@{ agent: reporter } --- create_report@{ shape: subroutine }
-      a_reporter --o dashboard@{ shape: doc }
-    end
+      task Step1
+        direction TB
+         aMonitor{{monitor}}@{ agent: monitor } --- triage_alert@{ shape: subroutine }
+        aMonitor --o triage@{ shape: doc}
+      end
+
+      task Step2
+        direction TB
+         anInvestigator{{investigator}}@{ agent: investigator } --- analyze_incident@{ shape: subroutine }
+        anInvestigator --o investigation@{ shape: doc}
+      end
+
+      task Step3
+        direction TB
+         anInvestigator{{investigator}}@{ agent: investigator } --- root_cause_analysis@{ shape: subroutine }
+        anInvestigator --o root_cause@{ shape: doc}
+      end
+
+      task Step4
+        direction TB
+         aResponder{{responder}}@{ agent: responder } --- generate_runbook@{ shape: subroutine }
+        aResponder --o runbook@{ shape: doc}
+      end
+
+      task Step5
+        direction TB
+         aReporter{{reporter}}@{ agent: reporter } --- create_report@{ shape: subroutine }
+        aReporter --o dashboard@{ shape: doc}
+      end
 
     Step1 -->|"triage"| Step2
     Step2 -->|"investigation"| Step3
@@ -202,18 +117,53 @@ Return this JSON exactly — do not modify or summarize it."
     Step4 -->|"investigation"| Step5
     Step4 -->|"root_cause"| Step5
 
-  flow detect_and_respond
-    task Step1
-      direction TB
-      a_sentinel{{sentinel}}@{ agent: sentinel } --- poll_health@{ shape: subroutine }
-      a_sentinel --o health_data@{ shape: doc }
+
+    task PStep1["Pipeline step 1"]
+        s1["@sentinel"]@{ shape: hex, agent: sentinel } --- poll_health@{ shape: subroutine }
+        s1 --o health_data@{ shape: doc}
     end
 
-    task Step2
-      direction TB
-      a_sentinel{{sentinel}}@{ agent: sentinel } --- detect_anomaly@{ shape: subroutine }
-      a_sentinel --o alert@{ shape: doc }
+    task PStep2["Pipeline step 2"]
+        s2["@sentinel"]@{ shape: hex, agent: sentinel } --- detect_anomaly@{ shape: subroutine }
+        s2 --o alert@{ shape: doc}
     end
 
-    Step1 -->|"health_data"| Step2
+    task PStep3["Pipeline step 3"]
+        respond["flow respond"]@{ shape: procs, src: "./respond.mmd"}
+        respond --o dashboard@{ shape: doc}
+    end
+
+    PStep1 --> PStep2 --> PStep3
+    respond@{
+      view: collapsed
+    }
+
+template %triage_result {
+    INCIDENT_ID: String           <<generated incident ID, e.g. INC-2026-0318-001>>
+    SEVERITY: String           <<P0 through P4 with justification>>
+    TITLE: String           <<concise incident title>>
+    AFFECTED_SERVICES: String           <<comma-separated list of impacted services>>
+    BLAST_RADIUS: String           <<user-facing impact assessment>>
+    INITIAL_HYPOTHESIS: String           <<most likely failure mode based on alert signals>>
+    ESCALATION: String           <<who to page and why>>
+    TIMELINE: String * 3           <<Timestamp | Event | Source>>
+  }
+
+template %investigation_report {
+    SUMMARY: String           <<one paragraph executive summary>>
+    METRICS_ANALYSIS: String           <<what the metrics tell us — latency, error rates, throughput>>
+    DEPENDENCY_MAP: String           <<upstream and downstream service dependencies>>
+    ANOMALY: String * 5           <<Timestamp | Service | Metric | Expected | Actual>>
+    CORRELATION: String           <<cross-service correlation analysis>>
+    EVIDENCE: String * 3           <<Finding category | Evidence | Confidence>>
+  }
+
+template %runbook_format {
+    OBJECTIVE: String           <<what this runbook achieves>>
+    PREREQUISITES: String           <<required access and tools>>
+    STEP: String * 8           <<Step # | Action | Command/Procedure | Rollback>>
+    VERIFICATION: String           <<how to confirm mitigation is working>>
+    COMMUNICATION: String           <<stakeholder update template>>
+    ESCALATION_PATH: String           <<when and how to escalate further>>
+  }
 

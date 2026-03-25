@@ -222,7 +222,9 @@ impl Dispatcher for OllamaDispatcher {
             limiter
                 .check_agent_limit(agent_name)
                 .map_err(|e| e.to_string())?;
-            limiter.check_global_limit().map_err(|e| e.to_string())?;
+            limiter
+                .check_global_limit()
+                .map_err(|e| e.to_string())?;
         }
 
         let prompt = Self::build_prompt(agent_name, tool_name, args);

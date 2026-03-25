@@ -42,6 +42,12 @@ pub struct BuildConfig {
     pub out_dir: PathBuf,
     /// Compilation target (determines tool format).
     pub target: Target,
+    /// Whether to emit Claude Code skill files.
+    pub emit_claude_skill: bool,
+    /// Whether to emit a CLAUDE.md file.
+    pub emit_claude_md: bool,
+    /// Whether to emit MCP server recommendations.
+    pub emit_mcp_recommendations: bool,
 }
 
 impl BuildConfig {
@@ -55,7 +61,15 @@ impl BuildConfig {
             source_path: source_path.into(),
             out_dir: out_dir.into(),
             target,
+            emit_claude_skill: false,
+            emit_claude_md: false,
+            emit_mcp_recommendations: false,
         }
+    }
+
+    /// Return the Claude Code skills output directory.
+    pub fn claude_skills_dir(&self) -> PathBuf {
+        self.out_dir.join(".claude").join("skills")
     }
 
     /// Return the path to the project manifest file.

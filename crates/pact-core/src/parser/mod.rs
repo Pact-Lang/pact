@@ -680,4 +680,48 @@ mod tests {
             _ => panic!("expected Flow"),
         }
     }
+
+    #[test]
+    fn parse_lesson_basic() {
+        let src = r#"lesson "cache_invalidation" {
+            context: <<After deploy, cache was stale for 10 minutes>>
+            rule: <<Always invalidate CDN cache after deploy>>
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Lesson(l) => {
+                assert_eq!(l.name, "cache_invalidation");
+                assert_eq!(
+                    l.context.as_deref(),
+                    Some("After deploy, cache was stale for 10 minutes")
+                );
+                assert_eq!(
+                    l.rule.as_deref(),
+                    Some("Always invalidate CDN cache after deploy")
+                );
+                assert!(l.severity.is_none());
+            }
+            _ => panic!("expected Lesson"),
+        }
+    }
+
+    #[test]
+    fn parse_lesson_with_severity() {
+        let src = r#"lesson "rate_limit" {
+            context: <<API returned 429 during peak hours>>
+            rule: <<Add exponential backoff to all API calls>>
+            severity: warning
+        }"#;
+        let prog = parse(src);
+        match &prog.decls[0].kind {
+            DeclKind::Lesson(l) => {
+                assert_eq!(l.name, "rate_limit");
+                assert!(l.context.is_some());
+                assert!(l.rule.is_some());
+                assert_eq!(l.severity.as_deref(), Some("warning"));
+            }
+            _ => panic!("expected Lesson"),
+        }
+    }
 }

@@ -356,10 +356,7 @@ impl LanguageServer for PactBackend {
         )))
     }
 
-    async fn references(
-        &self,
-        params: ReferenceParams,
-    ) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -485,6 +482,7 @@ fn check_error_span(err: &CheckError) -> miette::SourceSpan {
         CheckError::UnknownDirective { span, .. } => *span,
         CheckError::UnknownMcpServer { span, .. } => *span,
         CheckError::InvalidMcpTransport { span, .. } => *span,
+        CheckError::InvalidLessonSeverity { span, .. } => *span,
     }
 }
 
@@ -847,6 +845,16 @@ fn find_hover_info(text: &str, offset: usize) -> Option<String> {
             DeclKind::Connect(c) => {
                 let names: Vec<_> = c.servers.iter().map(|s| s.name.as_str()).collect();
                 return Some(format!("**connect** — MCP servers: {}", names.join(", ")));
+            }
+            DeclKind::Lesson(l) => {
+                let mut info = format!("**lesson** `\"{}\"`\n", l.name);
+                if let Some(sev) = &l.severity {
+                    info.push_str(&format!("\n- **severity**: {}", sev));
+                }
+                if let Some(rule) = &l.rule {
+                    info.push_str(&format!("\n- **rule**: {}", rule));
+                }
+                return Some(info);
             }
         }
     }

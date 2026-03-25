@@ -81,7 +81,8 @@ enum McpTransport {
         http: reqwest::Client,
         post_endpoint: String,
         next_id_sse: Arc<AtomicU64>,
-        pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
+        pending:
+            Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
         _sse_task: tokio::task::JoinHandle<()>,
     },
 }
@@ -180,13 +181,15 @@ impl McpConnection {
         debug!(server = name, url, "connecting via SSE");
 
         // Open the SSE stream and wait for the endpoint event
-        let mut es = EventSource::new(http.get(url).header("Accept", "text/event-stream"))
-            .map_err(|e| {
-                DispatchError::ExecutionError(format!(
-                    "MCP server '{}': failed to open SSE stream: {}",
-                    name, e
-                ))
-            })?;
+        let mut es = EventSource::new(
+            http.get(url).header("Accept", "text/event-stream"),
+        )
+        .map_err(|e| {
+            DispatchError::ExecutionError(format!(
+                "MCP server '{}': failed to open SSE stream: {}",
+                name, e
+            ))
+        })?;
 
         // Wait for the first `endpoint` event that tells us where to POST
         let post_endpoint = loop {
@@ -202,7 +205,10 @@ impl McpConnection {
                             endpoint
                         } else {
                             // Resolve relative to the SSE URL's origin
-                            let base = url.rfind('/').map(|i| &url[..i]).unwrap_or(url);
+                            let base = url
+                                .rfind('/')
+                                .map(|i| &url[..i])
+                                .unwrap_or(url);
                             format!("{}{}", base, endpoint)
                         };
                         break endpoint;
@@ -223,15 +229,12 @@ impl McpConnection {
             }
         };
 
-        debug!(
-            server = name,
-            post_endpoint = post_endpoint.as_str(),
-            "SSE endpoint received"
-        );
+        debug!(server = name, post_endpoint = post_endpoint.as_str(), "SSE endpoint received");
 
         // Set up response routing
-        let pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let pending: Arc<
+            Mutex<HashMap<u64, tokio::sync::oneshot::Sender<serde_json::Value>>>,
+        > = Arc::new(Mutex::new(HashMap::new()));
         let next_id_sse = Arc::new(AtomicU64::new(1));
 
         let pending_clone = Arc::clone(&pending);
@@ -242,7 +245,9 @@ impl McpConnection {
             while let Some(event) = es.next().await {
                 match event {
                     Ok(Event::Message(msg)) if msg.event == "message" => {
-                        if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&msg.data) {
+                        if let Ok(resp) =
+                            serde_json::from_str::<serde_json::Value>(&msg.data)
+                        {
                             if let Some(id) = resp.get("id").and_then(|v| v.as_u64()) {
                                 let mut map = pending_clone.lock().await;
                                 if let Some(tx) = map.remove(&id) {
@@ -360,7 +365,9 @@ impl McpConnection {
         params: Option<serde_json::Value>,
     ) -> Result<serde_json::Value, DispatchError> {
         match &mut self.transport {
-            McpTransport::Stdio { stdin, stdout, .. } => {
+            McpTransport::Stdio {
+                stdin, stdout, ..
+            } => {
                 let id = self.next_id;
                 self.next_id += 1;
 
@@ -392,12 +399,13 @@ impl McpConnection {
                 // Read response line (bounded to 10 MB to prevent OOM)
                 let mut response_line = String::new();
                 const MAX_LINE_SIZE: usize = 10 * 1024 * 1024;
-                let bytes_read = stdout.read_line(&mut response_line).await.map_err(|e| {
-                    DispatchError::ExecutionError(format!(
-                        "MCP server '{}': read error: {}",
-                        self.server_name, e
-                    ))
-                })?;
+                let bytes_read =
+                    stdout.read_line(&mut response_line).await.map_err(|e| {
+                        DispatchError::ExecutionError(format!(
+                            "MCP server '{}': read error: {}",
+                            self.server_name, e
+                        ))
+                    })?;
 
                 if bytes_read > MAX_LINE_SIZE {
                     return Err(DispatchError::ExecutionError(format!(
@@ -462,20 +470,23 @@ impl McpConnection {
                 }
 
                 // Wait for the response via SSE with a timeout
-                let response_value = tokio::time::timeout(std::time::Duration::from_secs(90), rx)
-                    .await
-                    .map_err(|_| {
-                        DispatchError::ExecutionError(format!(
-                            "MCP server '{}': timeout waiting for SSE response (id={})",
-                            self.server_name, id
-                        ))
-                    })?
-                    .map_err(|_| {
-                        DispatchError::ExecutionError(format!(
-                            "MCP server '{}': SSE response channel closed (id={})",
-                            self.server_name, id
-                        ))
-                    })?;
+                let response_value = tokio::time::timeout(
+                    std::time::Duration::from_secs(90),
+                    rx,
+                )
+                .await
+                .map_err(|_| {
+                    DispatchError::ExecutionError(format!(
+                        "MCP server '{}': timeout waiting for SSE response (id={})",
+                        self.server_name, id
+                    ))
+                })?
+                .map_err(|_| {
+                    DispatchError::ExecutionError(format!(
+                        "MCP server '{}': SSE response channel closed (id={})",
+                        self.server_name, id
+                    ))
+                })?;
 
                 let response_str = response_value.to_string();
                 Self::parse_jsonrpc_response(&self.server_name, &response_str)
@@ -545,12 +556,13 @@ impl McpConnection {
         server_name: &str,
         response_str: &str,
     ) -> Result<serde_json::Value, DispatchError> {
-        let response: JsonRpcResponse = serde_json::from_str(response_str).map_err(|e| {
-            DispatchError::ParseError(format!(
-                "MCP server '{}': invalid JSON-RPC response: {}",
-                server_name, e
-            ))
-        })?;
+        let response: JsonRpcResponse =
+            serde_json::from_str(response_str).map_err(|e| {
+                DispatchError::ParseError(format!(
+                    "MCP server '{}': invalid JSON-RPC response: {}",
+                    server_name, e
+                ))
+            })?;
 
         if let Some(err) = response.error {
             return Err(DispatchError::ExecutionError(format!(
@@ -643,7 +655,10 @@ impl McpConnectionPool {
     }
 
     /// List tools on an MCP server, connecting lazily if needed.
-    pub async fn list_tools(&self, server: &str) -> Result<Vec<McpToolInfo>, DispatchError> {
+    pub async fn list_tools(
+        &self,
+        server: &str,
+    ) -> Result<Vec<McpToolInfo>, DispatchError> {
         let mut connections = self.connections.lock().await;
         let conn = self.get_or_connect(&mut connections, server).await?;
         Ok(conn.list_tools().await?.to_vec())
@@ -740,7 +755,10 @@ mod tests {
         let pool = McpConnectionPool::from_program(&program);
         assert!(!pool.is_empty());
         assert_eq!(pool.configs.len(), 2);
-        assert_eq!(pool.configs.get("slack").unwrap(), "stdio slack-mcp-server");
+        assert_eq!(
+            pool.configs.get("slack").unwrap(),
+            "stdio slack-mcp-server"
+        );
     }
 
     #[test]
@@ -761,8 +779,7 @@ mod tests {
 
     #[test]
     fn parse_jsonrpc_response_error() {
-        let resp_str =
-            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#;
+        let resp_str = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}"#;
         let result = McpConnection::parse_jsonrpc_response("test", resp_str);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
@@ -821,9 +838,7 @@ mod tests {
 
             // Read the HTTP request
             let mut buf = vec![0u8; 4096];
-            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf)
-                .await
-                .unwrap();
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut buf).await.unwrap();
 
             // Send SSE headers and endpoint event
             let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\nevent: endpoint\ndata: /messages\n\n";

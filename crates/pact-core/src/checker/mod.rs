@@ -168,6 +168,19 @@ pub enum CheckError {
         span: miette::SourceSpan,
     },
 
+    /// A lesson has an invalid severity value.
+    #[error("invalid lesson severity '{value}' for lesson '{name}'")]
+    #[diagnostic(help("severity must be one of: info, warning, error"))]
+    InvalidLessonSeverity {
+        /// The lesson name.
+        name: String,
+        /// The invalid severity value.
+        value: String,
+        /// Location of the severity value.
+        #[label("invalid severity here")]
+        span: miette::SourceSpan,
+    },
+
     /// An MCP connect entry has an invalid transport prefix.
     #[error("invalid MCP transport '{transport}' for server '{name}'")]
     #[diagnostic(help("transport must start with 'stdio ' or 'sse '"))]
@@ -435,6 +448,29 @@ impl Checker {
                         // Auto-define mcp.{name} permission
                         self.symbols
                             .define_permission(format!("mcp.{}", entry.name));
+                    }
+                }
+                DeclKind::Lesson(l) => {
+                    // Validate severity if present
+                    if let Some(ref sev) = l.severity {
+                        if !matches!(sev.as_str(), "info" | "warning" | "error") {
+                            self.errors.push(CheckError::InvalidLessonSeverity {
+                                name: l.name.clone(),
+                                value: sev.clone(),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
+                        }
+                    }
+                    if !self.symbols.define(
+                        l.name.clone(),
+                        SymbolKind::Lesson {
+                            severity: l.severity.clone(),
+                        },
+                    ) {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: l.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
                     }
                 }
                 DeclKind::Test(_) => {
@@ -1156,5 +1192,57 @@ mod tests {
             "expected 1 type inference warning, got: {:?}",
             inference_warnings
         );
+    }
+
+    #[test]
+    fn checker_duplicate_lesson() {
+        let src = r#"
+            lesson "cache" {
+                rule: <<Always invalidate cache>>
+            }
+            lesson "cache" {
+                rule: <<Never cache>>
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, CheckError::DuplicateDefinition { name, .. } if name == "cache")),
+            "expected duplicate definition error for lesson 'cache'"
+        );
+    }
+
+    #[test]
+    fn checker_invalid_severity() {
+        let src = r#"
+            lesson "test_lesson" {
+                rule: <<Do the thing>>
+                severity: critical
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckError::InvalidLessonSeverity { name, value, .. }
+                if name == "test_lesson" && value == "critical"
+            )),
+            "expected invalid severity error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn checker_valid_lesson_passes() {
+        let src = r#"
+            lesson "good_lesson" {
+                context: <<Found a bug>>
+                rule: <<Fix the bug>>
+                severity: warning
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
     }
 }

@@ -53,7 +53,9 @@ pub fn pact_to_agentflow_text(program: &pact_core::ast::stmt::Program) -> String
 }
 
 /// Convert a PACT `Program` into agentflow JSON.
-pub fn pact_to_agentflow_json_value(program: &pact_core::ast::stmt::Program) -> serde_json::Value {
+pub fn pact_to_agentflow_json_value(
+    program: &pact_core::ast::stmt::Program,
+) -> serde_json::Value {
     agentflow_emit::pact_to_agentflow_json(program)
 }
 

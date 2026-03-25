@@ -265,6 +265,10 @@ fn handle_list(args: &Value) -> Result<String, String> {
                 let names: Vec<_> = c.servers.iter().map(|s| s.name.as_str()).collect();
                 lines.push(format!("connect — MCP servers: {}", names.join(", ")));
             }
+            DeclKind::Lesson(l) => {
+                let sev = l.severity.as_deref().unwrap_or("info");
+                lines.push(format!("lesson \"{}\" ({})", l.name, sev));
+            }
         }
     }
 
