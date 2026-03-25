@@ -972,9 +972,11 @@ impl<'a> AgentFlowParser<'a> {
                                     output_for_step.insert(to_n, label.clone());
                                 }
                                 // Also capture tool from the from side if not already.
-                                if !tool_for_step.contains_key(&from_n) {
+                                if let std::collections::btree_map::Entry::Vacant(e) =
+                                    tool_for_step.entry(from_n)
+                                {
                                     if let Some(label) = self.node_labels.get(&edge.from) {
-                                        tool_for_step.insert(from_n, label.clone());
+                                        e.insert(label.clone());
                                     }
                                 }
                             }
