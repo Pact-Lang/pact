@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 /// In-memory store backed by a JSON file on disk.
 pub struct MemoryStore {
-    #[allow(dead_code)]
     agent_name: String,
+    session_id: Option<String>,
     data: HashMap<String, String>,
     path: PathBuf,
 }
@@ -30,9 +30,38 @@ impl MemoryStore {
         };
         Self {
             agent_name: agent_name.to_string(),
+            session_id: None,
             data,
             path,
         }
+    }
+
+    /// Create or load a memory store for an agent within a specific session.
+    /// The session ID is used for observation correlation in the dispatch layer.
+    pub fn with_session(agent_name: &str, session_id: &str) -> Self {
+        let mut store = Self::load(agent_name);
+        store.session_id = Some(session_id.to_string());
+        store
+    }
+
+    /// Get the agent name this store belongs to.
+    pub fn agent_name(&self) -> &str {
+        &self.agent_name
+    }
+
+    /// Get the session ID, if set.
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
+    /// Get the number of entries in the store.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Check if the store is empty.
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
     }
 
     /// Get a value from memory.

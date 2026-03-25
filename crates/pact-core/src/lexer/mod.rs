@@ -392,6 +392,7 @@ impl<'src> Lexer<'src> {
             "validate" => TokenKind::Validate,
             "cache" => TokenKind::Cache,
             "connect" => TokenKind::Connect,
+            "lesson" => TokenKind::Lesson,
             _ => TokenKind::Ident(text.to_string()),
         };
 
@@ -624,6 +625,26 @@ mod tests {
         assert_eq!(
             kinds,
             vec![TokenKind::Skill, TokenKind::Skills, TokenKind::Strategy]
+        );
+    }
+
+    #[test]
+    fn lesson_keyword() {
+        let kinds = lex_kinds("lesson");
+        assert_eq!(kinds, vec![TokenKind::Lesson]);
+    }
+
+    #[test]
+    fn context_rule_severity_are_idents() {
+        // These are contextual — only special inside lesson blocks
+        let kinds = lex_kinds("context rule severity");
+        assert_eq!(
+            kinds,
+            vec![
+                TokenKind::Ident("context".into()),
+                TokenKind::Ident("rule".into()),
+                TokenKind::Ident("severity".into()),
+            ]
         );
     }
 

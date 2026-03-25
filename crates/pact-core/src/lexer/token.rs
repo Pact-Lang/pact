@@ -188,6 +188,8 @@ pub enum TokenKind {
     Cache,
     /// `connect` — MCP server connection block keyword
     Connect,
+    /// `lesson` — lesson declaration keyword
+    Lesson,
 
     // ── Literals ───────────────────────────────────────────
     /// Integer literal, e.g. `42`
@@ -292,6 +294,7 @@ impl TokenKind {
             Self::Validate => "'validate'",
             Self::Cache => "'cache'",
             Self::Connect => "'connect'",
+            Self::Lesson => "'lesson'",
             Self::IntLit(_) => "integer",
             Self::FloatLit(_) => "float",
             Self::StringLit(_) => "string",

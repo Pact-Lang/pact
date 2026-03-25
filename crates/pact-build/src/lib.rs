@@ -46,12 +46,18 @@ pub mod builtins;
 pub mod config;
 /// Claude tool_use JSON emission.
 pub mod emit_claude;
+/// CLAUDE.md process memory generation.
+pub mod emit_claude_md;
 /// Markdown prompt generation.
 pub mod emit_markdown;
+/// Claude Code skill file generation.
+pub mod emit_skill;
 /// TOML configuration emission.
 pub mod emit_toml;
 /// Runtime guardrail enforcement helpers.
 pub mod guardrails;
+/// MCP server recommendation engine.
+pub mod mcp_recommend;
 
 use config::BuildConfig;
 use pact_core::ast::stmt::{DeclKind, Program};
@@ -147,6 +153,29 @@ pub fn build(program: &Program, config: &BuildConfig) -> Result<(), BuildError> 
     // Write permissions config
     let permissions = emit_toml::generate_permissions_toml(program);
     std::fs::write(config.permissions_path(), permissions)?;
+
+    // Write Claude Code skill files (--claude-skill)
+    if config.emit_claude_skill {
+        for (path, content) in emit_skill::generate_all_skills(program) {
+            let full = config.out_dir.join(&path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(full, content)?;
+        }
+    }
+
+    // Write CLAUDE.md (--claude-md)
+    if config.emit_claude_md {
+        let md = emit_claude_md::generate_claude_md(program, config);
+        std::fs::write(config.out_dir.join("CLAUDE.md"), md)?;
+    }
+
+    // Write MCP recommendations (--recommend-mcp)
+    if config.emit_mcp_recommendations {
+        let md = mcp_recommend::generate_recommendations_md(program);
+        std::fs::write(config.out_dir.join("mcp_recommendations.md"), md)?;
+    }
 
     Ok(())
 }

@@ -26,7 +26,12 @@ use crate::convert::format_tool_call_message;
 use crate::executor::{execute_handler, extract_params, parse_handler, HandlerSpec};
 use crate::mcp_client::McpConnectionPool;
 use crate::mediation::{find_tool_decl, MediationError, RuntimeMediator};
+use crate::observation_store::{
+    new_observation, new_session_id, ObservationKind, ObservationStore,
+};
 use crate::rate_limit::RateLimiter;
+use crate::search::{search_agent_observations, SearchResult};
+use crate::summarizer::finalize_session;
 use crate::types::{ContentBlock, StopReason, ToolResultContent};
 use crate::DispatchError;
 
@@ -39,16 +44,21 @@ pub struct ToolUseLoop {
     max_iterations: usize,
     mcp_pool: Option<McpConnectionPool>,
     rate_limiter: Option<Arc<RateLimiter>>,
+    observation_store: Option<ObservationStore>,
 }
 
 impl ToolUseLoop {
     /// Create a new tool-use loop with the given client.
     pub fn new(client: AnthropicClient) -> Self {
+        let observation_store = ObservationStore::open()
+            .map_err(|e| warn!("failed to open observation store: {}", e))
+            .ok();
         Self {
             client,
             max_iterations: DEFAULT_MAX_ITERATIONS,
             mcp_pool: None,
             rate_limiter: None,
+            observation_store,
         }
     }
 
@@ -98,6 +108,17 @@ impl ToolUseLoop {
         args: &[Value],
     ) -> Result<Value, DispatchError> {
         let mediator = RuntimeMediator::new(agent, program);
+        let session_id = new_session_id();
+
+        // Start observation session
+        if let Some(store) = &self.observation_store {
+            if let Err(e) = store.start_session(&session_id, &agent.name) {
+                warn!(
+                    agent = agent.name,
+                    "failed to start observation session: {}", e
+                );
+            }
+        }
 
         // Check rate limits before dispatching
         if let Some(limiter) = &self.rate_limiter {
@@ -114,7 +135,18 @@ impl ToolUseLoop {
         let mut request = build_agent_request(agent, program, &user_message);
 
         // Override the system prompt with the full guardrails-enhanced version
-        request.system = Some(generate_agent_prompt(agent, program));
+        let mut system_prompt = generate_agent_prompt(agent, program);
+
+        // Progressive disclosure: inject relevant memory context into the system prompt
+        if let Some(store) = &self.observation_store {
+            let memory_context = build_memory_context(store, &agent.name, tool_name);
+            if !memory_context.is_empty() {
+                system_prompt.push_str("\n\n");
+                system_prompt.push_str(&memory_context);
+            }
+        }
+
+        request.system = Some(system_prompt);
 
         let mut iteration = 0;
 
@@ -188,6 +220,38 @@ impl ToolUseLoop {
                         }
                     }
 
+                    // Record final agent response observation
+                    if let Some(store) = &self.observation_store {
+                        let obs = new_observation(
+                            &session_id,
+                            &agent.name,
+                            Some(tool_name),
+                            None,
+                            &text,
+                            Some(
+                                response.usage.input_tokens as u64
+                                    + response.usage.output_tokens as u64,
+                            ),
+                            ObservationKind::AgentResponse,
+                        );
+                        if let Err(e) = store.record(&obs) {
+                            warn!(agent = agent.name, "failed to record observation: {}", e);
+                        }
+                        match finalize_session(store, &session_id) {
+                            Ok(summary) => {
+                                debug!(
+                                    agent = agent.name,
+                                    tools = summary.tool_call_count,
+                                    tokens = summary.total_tokens,
+                                    "session summarized"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(agent = agent.name, "failed to finalize session: {}", e);
+                            }
+                        }
+                    }
+
                     info!(agent = agent.name, "completed (output validated)");
                     return Ok(Value::ToolResult(text));
                 }
@@ -248,7 +312,42 @@ impl ToolUseLoop {
                         if let ContentBlock::ToolUse { id, name, input } = tool_use {
                             info!(agent = agent.name, tool = name.as_str(), "executing tool");
 
+                            // Record tool call observation
+                            if let Some(store) = &self.observation_store {
+                                let obs = new_observation(
+                                    &session_id,
+                                    &agent.name,
+                                    Some(name),
+                                    Some(&input.to_string()),
+                                    &format!("tool_use:{}", name),
+                                    None,
+                                    ObservationKind::ToolCall,
+                                );
+                                if let Err(e) = store.record(&obs) {
+                                    warn!(agent = agent.name, "failed to record tool call: {}", e);
+                                }
+                            }
+
                             let result = execute_tool(name, input, program).await?;
+
+                            // Record tool result observation
+                            if let Some(store) = &self.observation_store {
+                                let obs = new_observation(
+                                    &session_id,
+                                    &agent.name,
+                                    Some(name),
+                                    Some(&input.to_string()),
+                                    &result,
+                                    None,
+                                    ObservationKind::ToolResult,
+                                );
+                                if let Err(e) = store.record(&obs) {
+                                    warn!(
+                                        agent = agent.name,
+                                        "failed to record tool result: {}", e
+                                    );
+                                }
+                            }
 
                             let tool_result = ToolResultContent::success(id, &result);
                             tool_results.push(
@@ -424,6 +523,59 @@ async fn execute_tool_once(
         "result": format!("Simulated result from #{} with input: {}", tool_name, input),
     });
     Ok(result.to_string())
+}
+
+/// Build memory context for progressive disclosure.
+///
+/// Searches the observation store for relevant prior observations and
+/// formats them as a compact context block to inject into the system prompt.
+/// Uses TF-IDF search with the tool name as the query, returning at most
+/// 5 relevant prior observations.
+fn build_memory_context(store: &ObservationStore, agent_name: &str, tool_name: &str) -> String {
+    // Search for observations relevant to the current tool call
+    let results = match search_agent_observations(store, agent_name, tool_name, 5) {
+        Ok(results) => results,
+        Err(e) => {
+            debug!("memory context search failed: {}", e);
+            return String::new();
+        }
+    };
+
+    if results.is_empty() {
+        return String::new();
+    }
+
+    format_memory_context(&results)
+}
+
+/// Format search results as a memory context block for the system prompt.
+fn format_memory_context(results: &[SearchResult]) -> String {
+    let mut ctx = String::from("## Prior Context (from memory)\n\n");
+    ctx.push_str("The following observations are from previous sessions and may be relevant:\n\n");
+
+    for (i, result) in results.iter().enumerate() {
+        let obs = &result.observation;
+        let tool_label = obs.tool.as_deref().unwrap_or("unknown");
+        let snippet = truncate_output(&obs.output, 200);
+        ctx.push_str(&format!(
+            "{}. [{}] {}: {}\n",
+            i + 1,
+            obs.timestamp.split('T').next().unwrap_or(&obs.timestamp),
+            tool_label,
+            snippet,
+        ));
+    }
+
+    ctx
+}
+
+/// Truncate output for memory context display.
+fn truncate_output(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
 }
 
 /// Validate tool output against a template's expected structure.
@@ -621,5 +773,88 @@ mod tests {
             validate_output_against_template("ITEM_1: A\nITEM_2: B", "items", &program).is_ok()
         );
         assert!(validate_output_against_template("ITEM_1: A", "items", &program).is_err());
+    }
+
+    #[test]
+    fn memory_context_formats_results() {
+        use crate::observation_store::{new_observation, ObservationKind};
+        use crate::search::SearchResult;
+
+        let obs = new_observation(
+            "sess-1",
+            "agent_a",
+            Some("fetch_issues"),
+            None,
+            "found 42 issues about rendering bugs",
+            Some(100),
+            ObservationKind::ToolResult,
+        );
+        let results = vec![SearchResult {
+            observation: obs,
+            score: 0.85,
+        }];
+
+        let ctx = format_memory_context(&results);
+        assert!(ctx.contains("## Prior Context (from memory)"));
+        assert!(ctx.contains("fetch_issues"));
+        assert!(ctx.contains("42 issues about rendering bugs"));
+    }
+
+    #[test]
+    fn memory_context_empty_when_no_results() {
+        let ctx = format_memory_context(&[]);
+        // Empty slice still produces the header — but build_memory_context
+        // checks for empty results before calling format.
+        // The function itself always produces output.
+        assert!(ctx.contains("Prior Context"));
+    }
+
+    #[test]
+    fn build_memory_context_with_store() {
+        let store = ObservationStore::in_memory().unwrap();
+        let sid = "sess-ctx";
+        store.start_session(sid, "agent_m").unwrap();
+
+        // Add multiple observations so TF-IDF has meaningful IDF scores
+        let obs1 = new_observation(
+            sid,
+            "agent_m",
+            Some("classify_issues"),
+            None,
+            "classified issues by diagram type and persona",
+            None,
+            ObservationKind::ToolResult,
+        );
+        store.record(&obs1).unwrap();
+
+        let obs2 = new_observation(
+            sid,
+            "agent_m",
+            Some("fetch_data"),
+            None,
+            "fetched raw data from the API endpoint",
+            None,
+            ObservationKind::ToolResult,
+        );
+        store.record(&obs2).unwrap();
+
+        let ctx = build_memory_context(&store, "agent_m", "classify_issues");
+        assert!(ctx.contains("classify_issues"));
+        assert!(ctx.contains("diagram type"));
+    }
+
+    #[test]
+    fn build_memory_context_empty_for_new_agent() {
+        let store = ObservationStore::in_memory().unwrap();
+        let ctx = build_memory_context(&store, "new_agent", "some_tool");
+        assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn truncate_output_works() {
+        assert_eq!(truncate_output("short", 10), "short");
+        let long = "x".repeat(300);
+        let result = truncate_output(&long, 200);
+        assert_eq!(result.len(), 203); // 200 + "..."
     }
 }

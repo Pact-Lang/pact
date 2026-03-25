@@ -127,6 +127,21 @@ impl Formatter {
                 self.dedent();
                 self.push_line("}");
             }
+            DeclKind::Lesson(l) => {
+                self.push_line(&format!("lesson \"{}\" {{", l.name));
+                self.indent();
+                if let Some(ctx) = &l.context {
+                    self.push_line(&format!("context: <<{}>>", ctx));
+                }
+                if let Some(rule) = &l.rule {
+                    self.push_line(&format!("rule: <<{}>>", rule));
+                }
+                if let Some(sev) = &l.severity {
+                    self.push_line(&format!("severity: {}", sev));
+                }
+                self.dedent();
+                self.push_line("}");
+            }
         }
     }
 

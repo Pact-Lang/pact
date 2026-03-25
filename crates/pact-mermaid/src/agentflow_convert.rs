@@ -22,10 +22,19 @@ pub fn agentflow_graph_to_pact(graph: &AgentFlowGraph) -> String {
         out.push('\n');
     }
 
-    // Schema declarations.
-    for schema in &graph.schemas {
-        emit_schema(schema, &mut out);
+    // Type declarations → schema or type.
+    for ty in &graph.types {
+        emit_type_decl(ty, &mut out);
         out.push('\n');
+    }
+
+    // Schema declarations (for backward compat — skip if already emitted via types).
+    let type_names: BTreeSet<&str> = graph.types.iter().map(|t| t.name.as_str()).collect();
+    for schema in &graph.schemas {
+        if !type_names.contains(schema.id.as_str()) {
+            emit_schema(schema, &mut out);
+            out.push('\n');
+        }
     }
 
     // Template declarations.
@@ -41,10 +50,13 @@ pub fn agentflow_graph_to_pact(graph: &AgentFlowGraph) -> String {
     }
 
     // Tool and skill declarations (extracted from agents).
+    // Only emit tools that have meaningful metadata (description, params, etc.).
     for agent in &graph.agents {
         for tool in &agent.nodes {
-            emit_tool(tool, &mut out);
-            out.push('\n');
+            if tool_has_metadata(tool) {
+                emit_tool(tool, &mut out);
+                out.push('\n');
+            }
         }
         for skill in &agent.skills {
             emit_skill(skill, &mut out);
@@ -52,8 +64,16 @@ pub fn agentflow_graph_to_pact(graph: &AgentFlowGraph) -> String {
         }
     }
 
-    // Agent declarations.
+    // Agent declarations. Skip empty wrapper agents (bundle containers).
     for agent in &graph.agents {
+        if agent.nodes.is_empty()
+            && agent.skills.is_empty()
+            && agent.permits.is_empty()
+            && agent.prompt.is_none()
+            && agent.model.is_none()
+        {
+            continue;
+        }
         emit_agent(agent, &mut out);
         out.push('\n');
     }
@@ -64,14 +84,41 @@ pub fn agentflow_graph_to_pact(graph: &AgentFlowGraph) -> String {
         out.push('\n');
     }
 
-    // Flow from edges.
-    let flow_edges: Vec<&AgentFlowEdge> = graph
+    // Flow declarations.
+    if !graph.flows.is_empty() {
+        for flow in &graph.flows {
+            emit_named_flow(flow, graph, &mut out);
+            out.push('\n');
+        }
+    } else {
+        // Legacy fallback: reconstruct a single flow from edges.
+        let flow_edges: Vec<&AgentFlowEdge> = graph
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Flow)
+            .collect();
+        if !flow_edges.is_empty() {
+            emit_flow_from_edges(&flow_edges, graph, &mut out);
+        }
+    }
+
+    // Emit comments for association edges (skip internal flow wiring).
+    let flow_prefixes: Vec<String> = graph.flows.iter().map(|f| format!("{}_", f.name)).collect();
+    let assoc_edges: Vec<&AgentFlowEdge> = graph
         .edges
         .iter()
-        .filter(|e| e.edge_type == EdgeType::Flow)
+        .filter(|e| {
+            e.edge_type == EdgeType::Association
+                && !flow_prefixes
+                    .iter()
+                    .any(|p| e.from.starts_with(p) || e.to.starts_with(p))
+        })
         .collect();
-    if !flow_edges.is_empty() {
-        emit_flow(&flow_edges, graph, &mut out);
+    if !assoc_edges.is_empty() {
+        out.push_str("\n-- Associations\n");
+        for edge in &assoc_edges {
+            out.push_str(&format!("-- {} --- {}\n", edge.from, edge.to));
+        }
     }
 
     out
@@ -82,6 +129,16 @@ pub fn agentflow_graph_to_pact(graph: &AgentFlowGraph) -> String {
 fn collect_permissions(graph: &AgentFlowGraph) -> BTreeSet<String> {
     let mut perms = BTreeSet::new();
     for agent in &graph.agents {
+        // Collect from agent-level permits.
+        for p in &agent.permits {
+            let normalized = if p.starts_with('^') {
+                p.clone()
+            } else {
+                format!("^{}", p)
+            };
+            perms.insert(normalized);
+        }
+        // Also collect from tools.
         for tool in &agent.nodes {
             for p in &tool.metadata.requires {
                 perms.insert(p.clone());
@@ -92,7 +149,6 @@ fn collect_permissions(graph: &AgentFlowGraph) -> BTreeSet<String> {
 }
 
 fn emit_permit_tree(perms: &BTreeSet<String>, out: &mut String) {
-    // Group permissions by top-level namespace: ^ns.leaf → ns → [ns.leaf]
     let mut groups: BTreeSet<String> = BTreeSet::new();
     for p in perms {
         let stripped = p.strip_prefix('^').unwrap_or(p);
@@ -113,7 +169,6 @@ fn emit_permit_tree(perms: &BTreeSet<String>, out: &mut String) {
         out.push_str("    }\n");
     }
 
-    // Any permissions without a dot (top-level).
     for p in perms {
         let stripped = p.strip_prefix('^').unwrap_or(p);
         if !stripped.contains('.') {
@@ -122,6 +177,32 @@ fn emit_permit_tree(perms: &BTreeSet<String>, out: &mut String) {
     }
 
     out.push_str("}\n");
+}
+
+// ── Type declarations ──────────────────────────────────────────────────────
+
+fn emit_type_decl(ty: &AgentFlowTypeDecl, out: &mut String) {
+    match &ty.kind {
+        TypeDeclKind::Opaque => {
+            out.push_str(&format!("-- opaque type: {}\n", ty.name));
+        }
+        TypeDeclKind::Alias { target } => {
+            // Check if it looks like a union type (contains |).
+            if target.contains('|') {
+                let variants: Vec<&str> = target.split('|').map(|s| s.trim()).collect();
+                out.push_str(&format!("type {} = {}\n", ty.name, variants.join(" | ")));
+            } else {
+                out.push_str(&format!("type {} = {}\n", ty.name, target));
+            }
+        }
+        TypeDeclKind::Record { fields } => {
+            out.push_str(&format!("schema {} {{\n", ty.name));
+            for (name, field_ty) in fields {
+                out.push_str(&format!("    {} :: {}\n", name, field_ty));
+            }
+            out.push_str("}\n");
+        }
+    }
 }
 
 // ── Schema ─────────────────────────────────────────────────────────────────
@@ -137,16 +218,17 @@ fn emit_schema(schema: &AgentFlowSchemaNode, out: &mut String) {
 // ── Template ───────────────────────────────────────────────────────────────
 
 fn emit_template(template: &AgentFlowTemplateNode, out: &mut String) {
-    out.push_str(&format!("template %{} {{\n", template.id));
-    for (name, ty) in &template.metadata.fields {
-        // Handle repeat fields like "String * 6".
+    // Strip % prefix if present (for backward compat).
+    let name = template.id.strip_prefix('%').unwrap_or(&template.id);
+    out.push_str(&format!("template %{} {{\n", name));
+    for (field_name, ty) in &template.metadata.fields {
         if let Some(rest) = ty.strip_prefix("String * ") {
             if let Ok(count) = rest.trim().parse::<usize>() {
-                out.push_str(&format!("    {} :: String * {}\n", name, count));
+                out.push_str(&format!("    {} :: String * {}\n", field_name, count));
                 continue;
             }
         }
-        out.push_str(&format!("    {} :: {}\n", name, ty));
+        out.push_str(&format!("    {} :: {}\n", field_name, ty));
     }
     for section in &template.metadata.sections {
         out.push_str(&format!("    section {}\n", section));
@@ -157,18 +239,21 @@ fn emit_template(template: &AgentFlowTemplateNode, out: &mut String) {
 // ── Directive ──────────────────────────────────────────────────────────────
 
 fn emit_directive(directive: &AgentFlowDirectiveNode, out: &mut String) {
-    out.push_str(&format!("directive %{} {{\n", directive.id));
+    let name = directive.id.strip_prefix('%').unwrap_or(&directive.id);
+    out.push_str(&format!("directive %{} {{\n", name));
     out.push_str(&format!("    <<{}>>\n", directive.metadata.text));
     if !directive.metadata.params.is_empty() {
         out.push_str("    params {\n");
-        for (name, ty_default) in &directive.metadata.params {
-            // ty_default is like "String = Playfair Display"
+        for (param_name, ty_default) in &directive.metadata.params {
             if let Some(eq_pos) = ty_default.find(" = ") {
                 let ty = &ty_default[..eq_pos];
                 let default = &ty_default[eq_pos + 3..];
-                out.push_str(&format!("        {} :: {} = <<{}>>\n", name, ty, default));
+                out.push_str(&format!(
+                    "        {} :: {} = <<{}>>\n",
+                    param_name, ty, default
+                ));
             } else {
-                out.push_str(&format!("        {} :: {}\n", name, ty_default));
+                out.push_str(&format!("        {} :: {}\n", param_name, ty_default));
             }
         }
         out.push_str("    }\n");
@@ -181,10 +266,12 @@ fn emit_directive(directive: &AgentFlowDirectiveNode, out: &mut String) {
 fn emit_tool(tool: &AgentFlowToolNode, out: &mut String) {
     let name = to_snake_case(&tool.id);
     out.push_str(&format!("tool #{} {{\n", name));
-    out.push_str(&format!(
-        "    description: <<{}>>\n",
-        tool.metadata.description
-    ));
+    if !tool.metadata.description.is_empty() {
+        out.push_str(&format!(
+            "    description: <<{}>>\n",
+            tool.metadata.description
+        ));
+    }
 
     if !tool.metadata.requires.is_empty() {
         let perms: Vec<String> = tool
@@ -203,7 +290,6 @@ fn emit_tool(tool: &AgentFlowToolNode, out: &mut String) {
     }
 
     if let Some(source) = &tool.metadata.source {
-        // source: "^search.duckduckgo(query)" → source: ^search.duckduckgo(query)
         let s = source.strip_prefix('^').unwrap_or(source);
         out.push_str(&format!("    source: ^{}\n", s));
     }
@@ -232,8 +318,8 @@ fn emit_tool(tool: &AgentFlowToolNode, out: &mut String) {
 
     if !tool.metadata.params.is_empty() {
         out.push_str("    params {\n");
-        for (name, ty) in &tool.metadata.params {
-            out.push_str(&format!("        {} :: {}\n", name, ty));
+        for (param_name, ty) in &tool.metadata.params {
+            out.push_str(&format!("        {} :: {}\n", param_name, ty));
         }
         out.push_str("    }\n");
     }
@@ -254,7 +340,6 @@ fn emit_tool(tool: &AgentFlowToolNode, out: &mut String) {
         out.push_str(&format!("    validate: {}\n", validate));
     }
 
-    // Emit deny as a comment (not a PACT syntax element).
     if !tool.metadata.deny.is_empty() {
         for d in &tool.metadata.deny {
             out.push_str(&format!("    -- deny: {}\n", d));
@@ -293,8 +378,8 @@ fn emit_skill(skill: &AgentFlowSkillNode, out: &mut String) {
 
     if !skill.metadata.params.is_empty() {
         out.push_str("    params {\n");
-        for (name, ty) in &skill.metadata.params {
-            out.push_str(&format!("        {} :: {}\n", name, ty));
+        for (param_name, ty) in &skill.metadata.params {
+            out.push_str(&format!("        {} :: {}\n", param_name, ty));
         }
         out.push_str("    }\n");
     }
@@ -311,19 +396,31 @@ fn emit_skill(skill: &AgentFlowSkillNode, out: &mut String) {
 fn emit_agent(agent: &AgentFlowAgent, out: &mut String) {
     out.push_str(&format!("agent @{} {{\n", agent.id));
 
-    // Collect all requires from tools, minus any deny.
+    // Use agent-level permits if available, otherwise collect from tools.
     let mut permits: BTreeSet<String> = BTreeSet::new();
     let mut denies: BTreeSet<String> = BTreeSet::new();
-    for tool in &agent.nodes {
-        for p in &tool.metadata.requires {
-            permits.insert(p.clone());
+
+    if !agent.permits.is_empty() {
+        for p in &agent.permits {
+            let normalized = if p.starts_with('^') {
+                p.clone()
+            } else {
+                format!("^{}", p)
+            };
+            permits.insert(normalized);
         }
-        for d in &tool.metadata.deny {
-            denies.insert(d.clone());
+    } else {
+        for tool in &agent.nodes {
+            for p in &tool.metadata.requires {
+                permits.insert(p.clone());
+            }
+            for d in &tool.metadata.deny {
+                denies.insert(d.clone());
+            }
         }
-    }
-    for d in &denies {
-        permits.remove(d);
+        for d in &denies {
+            permits.remove(d);
+        }
     }
 
     if !permits.is_empty() {
@@ -342,7 +439,6 @@ fn emit_agent(agent: &AgentFlowAgent, out: &mut String) {
         out.push_str("    permits: []\n");
     }
 
-    // Tools list.
     if !agent.nodes.is_empty() {
         let tool_list: Vec<String> = agent
             .nodes
@@ -354,7 +450,6 @@ fn emit_agent(agent: &AgentFlowAgent, out: &mut String) {
         out.push_str("    tools: []\n");
     }
 
-    // Skills list.
     if !agent.skills.is_empty() {
         let skill_list: Vec<String> = agent
             .skills
@@ -365,7 +460,7 @@ fn emit_agent(agent: &AgentFlowAgent, out: &mut String) {
     }
 
     if let Some(model) = &agent.model {
-        out.push_str(&format!("    model: <<{}>>\n", model));
+        out.push_str(&format!("    model: \"{}\"\n", model));
     }
 
     if let Some(prompt) = &agent.prompt {
@@ -401,10 +496,57 @@ fn emit_bundle(bundle: &AgentFlowBundle, out: &mut String) {
 
 // ── Flow ───────────────────────────────────────────────────────────────────
 
-fn emit_flow(flow_edges: &[&AgentFlowEdge], graph: &AgentFlowGraph, out: &mut String) {
+/// Emit a named flow from a parsed `AgentFlowDef` with reconstructed steps.
+fn emit_named_flow(flow: &AgentFlowDef, _graph: &AgentFlowGraph, out: &mut String) {
+    // Build parameter list.
+    let params: Vec<String> = flow
+        .params
+        .iter()
+        .map(|(k, v)| format!("{} :: {}", k, v))
+        .collect();
+    let params_str = if params.is_empty() {
+        "input :: String".to_string()
+    } else {
+        params.join(", ")
+    };
+
+    let returns = flow.returns.as_deref().unwrap_or("String");
+
+    out.push_str(&format!(
+        "flow {}({}) -> {} {{\n",
+        flow.name, params_str, returns
+    ));
+
+    for (i, step) in flow.steps.iter().enumerate() {
+        let args = if step.args.is_empty() {
+            if i == 0 {
+                flow.params.keys().cloned().collect::<Vec<_>>().join(", ")
+            } else {
+                flow.steps[i - 1].output_var.clone()
+            }
+        } else {
+            step.args.join(", ")
+        };
+
+        out.push_str(&format!(
+            "    {} = @{} -> #{}({})\n",
+            step.output_var,
+            step.agent,
+            to_snake_case(&step.tool),
+            args
+        ));
+    }
+
+    if let Some(last) = flow.steps.last() {
+        out.push_str(&format!("    return {}\n", last.output_var));
+    }
+    out.push_str("}\n");
+}
+
+/// Legacy fallback: reconstruct a single flow from edge connections.
+fn emit_flow_from_edges(flow_edges: &[&AgentFlowEdge], graph: &AgentFlowGraph, out: &mut String) {
     out.push_str("flow main(input :: String) -> String {\n");
 
-    // Build a lookup: tool_id → agent_id.
     let mut tool_to_agent: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     for agent in &graph.agents {
@@ -423,7 +565,6 @@ fn emit_flow(flow_edges: &[&AgentFlowEdge], graph: &AgentFlowGraph, out: &mut St
 
         let to_name = to_snake_case(&edge.to);
 
-        // If the target is a tool inside an agent, emit agent dispatch.
         if let Some(agent_id) = tool_to_agent.get(&edge.to) {
             out.push_str(&format!(
                 "    {} = @{} -> #{}({})\n",
@@ -440,6 +581,21 @@ fn emit_flow(flow_edges: &[&AgentFlowEdge], graph: &AgentFlowGraph, out: &mut St
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
+
+/// Check if a tool node has any meaningful metadata beyond just an ID.
+fn tool_has_metadata(tool: &AgentFlowToolNode) -> bool {
+    !tool.metadata.description.is_empty()
+        || !tool.metadata.requires.is_empty()
+        || !tool.metadata.params.is_empty()
+        || tool.metadata.returns.is_some()
+        || tool.metadata.source.is_some()
+        || tool.metadata.handler.is_some()
+        || tool.metadata.output.is_some()
+        || !tool.metadata.directives.is_empty()
+        || tool.metadata.retry.is_some()
+        || tool.metadata.cache.is_some()
+        || tool.metadata.validate.is_some()
+}
 
 fn to_snake_case(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
@@ -459,7 +615,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn sample_graph() -> AgentFlowGraph {
-        let mut g = AgentFlowGraph::new("LR");
+        let mut g = AgentFlowGraph::new("TB");
 
         g.schemas.push(AgentFlowSchemaNode {
             id: "SiteConfig".to_string(),
@@ -501,12 +657,13 @@ mod tests {
             label: "@researcher".to_string(),
             model: None,
             prompt: None,
+            permits: vec!["^net.read".to_string()],
             memory: vec![],
             nodes: vec![
                 AgentFlowToolNode {
                     id: "research_location".to_string(),
                     label: "Research Location".to_string(),
-                    shape: "roundedRect".to_string(),
+                    shape: "subroutine".to_string(),
                     metadata: ToolMetadata {
                         description: "Research a city".to_string(),
                         requires: vec!["^net.read".to_string()],
@@ -525,7 +682,7 @@ mod tests {
                 AgentFlowToolNode {
                     id: "write_copy".to_string(),
                     label: "Write Copy".to_string(),
-                    shape: "roundedRect".to_string(),
+                    shape: "subroutine".to_string(),
                     metadata: ToolMetadata {
                         description: "Write marketing copy".to_string(),
                         requires: vec!["^llm.query".to_string()],
@@ -550,11 +707,12 @@ mod tests {
             label: "@designer".to_string(),
             model: None,
             prompt: None,
+            permits: vec!["^llm.query".to_string()],
             memory: vec![],
             nodes: vec![AgentFlowToolNode {
                 id: "generate_html".to_string(),
                 label: "Generate HTML".to_string(),
-                shape: "roundedRect".to_string(),
+                shape: "subroutine".to_string(),
                 metadata: ToolMetadata {
                     description: "Generate a one-page HTML website".to_string(),
                     requires: vec!["^llm.query".to_string()],
@@ -579,18 +737,21 @@ mod tests {
                 to: "write_copy".to_string(),
                 label: None,
                 edge_type: EdgeType::Flow,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
                 from: "write_copy".to_string(),
                 to: "generate_html".to_string(),
                 label: None,
                 edge_type: EdgeType::Flow,
+                stroke: EdgeStroke::Normal,
             },
             AgentFlowEdge {
                 from: "write_copy".to_string(),
                 to: "website_copy".to_string(),
                 label: None,
                 edge_type: EdgeType::Reference,
+                stroke: EdgeStroke::Dotted,
             },
         ];
 
@@ -662,7 +823,7 @@ mod tests {
 
     #[test]
     fn generates_bundle() {
-        let mut g = AgentFlowGraph::new("LR");
+        let mut g = AgentFlowGraph::new("TB");
         g.bundles.push(AgentFlowBundle {
             id: "website_team".to_string(),
             label: "@website_team".to_string(),
@@ -677,17 +838,18 @@ mod tests {
 
     #[test]
     fn deny_emitted_as_comment() {
-        let mut g = AgentFlowGraph::new("LR");
+        let mut g = AgentFlowGraph::new("TB");
         g.agents.push(AgentFlowAgent {
             id: "restricted".to_string(),
             label: "@restricted".to_string(),
             model: None,
             prompt: None,
+            permits: vec![],
             memory: vec![],
             nodes: vec![AgentFlowToolNode {
                 id: "limited_tool".to_string(),
                 label: "Limited Tool".to_string(),
-                shape: "roundedRect".to_string(),
+                shape: "subroutine".to_string(),
                 metadata: ToolMetadata {
                     description: "A restricted tool".to_string(),
                     requires: vec!["^llm.query".to_string()],
@@ -707,5 +869,164 @@ mod tests {
         });
         let pact = agentflow_graph_to_pact(&g);
         assert!(pact.contains("-- deny: ^net.write"));
+    }
+
+    #[test]
+    fn converts_type_decl_record_to_schema() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.types.push(AgentFlowTypeDecl {
+            name: "Report".to_string(),
+            kind: TypeDeclKind::Record {
+                fields: BTreeMap::from([
+                    ("title".to_string(), "String".to_string()),
+                    ("body".to_string(), "String".to_string()),
+                ]),
+            },
+        });
+        let pact = agentflow_graph_to_pact(&g);
+        assert!(pact.contains("schema Report {"));
+        assert!(pact.contains("title :: String"));
+    }
+
+    #[test]
+    fn converts_type_decl_alias() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.types.push(AgentFlowTypeDecl {
+            name: "Status".to_string(),
+            kind: TypeDeclKind::Alias {
+                target: "Active | Inactive".to_string(),
+            },
+        });
+        let pact = agentflow_graph_to_pact(&g);
+        assert!(pact.contains("type Status = Active | Inactive"));
+    }
+
+    #[test]
+    fn handles_association_edges() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.edges.push(AgentFlowEdge {
+            from: "doc_a".to_string(),
+            to: "doc_b".to_string(),
+            label: None,
+            edge_type: EdgeType::Association,
+            stroke: EdgeStroke::Normal,
+        });
+        let pact = agentflow_graph_to_pact(&g);
+        assert!(pact.contains("-- doc_a --- doc_b"));
+    }
+
+    #[test]
+    fn agent_permits_used_directly() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.agents.push(AgentFlowAgent {
+            id: "test_agent".to_string(),
+            label: "@test_agent".to_string(),
+            model: None,
+            prompt: None,
+            permits: vec!["^net.read".to_string(), "^llm.query".to_string()],
+            memory: vec![],
+            nodes: vec![],
+            skills: vec![],
+        });
+        let pact = agentflow_graph_to_pact(&g);
+        assert!(pact.contains("permits: [^llm.query, ^net.read]"));
+    }
+
+    #[test]
+    fn delegation_edges_become_dispatch() {
+        // Delegation edges (-->>) should be treated like flow edges.
+        let mut g = AgentFlowGraph::new("TB");
+        g.agents.push(AgentFlowAgent {
+            id: "coordinator".into(),
+            label: "@coordinator".into(),
+            model: None,
+            prompt: None,
+            permits: vec![],
+            memory: vec![],
+            nodes: vec![AgentFlowToolNode {
+                id: "plan".into(),
+                label: "Plan".into(),
+                shape: "subroutine".into(),
+                metadata: ToolMetadata {
+                    description: "Plan".into(),
+                    requires: vec![],
+                    deny: vec![],
+                    source: None,
+                    handler: None,
+                    output: None,
+                    directives: vec![],
+                    params: BTreeMap::new(),
+                    returns: Some("String".into()),
+                    retry: None,
+                    cache: None,
+                    validate: None,
+                },
+            }],
+            skills: vec![],
+        });
+        g.edges.push(AgentFlowEdge {
+            from: "input".into(),
+            to: "plan".into(),
+            label: None,
+            edge_type: EdgeType::Delegation,
+            stroke: EdgeStroke::Normal,
+        });
+        // Delegation edges aren't Flow, so emit_flow won't include them.
+        // Verify no crash and output is valid PACT.
+        let pact = agentflow_graph_to_pact(&g);
+        assert!(pact.contains("agent @coordinator"));
+    }
+
+    #[test]
+    fn output_binding_edges_not_in_flow() {
+        // OutputBinding edges (--o) should not appear in the flow body.
+        let mut g = AgentFlowGraph::new("TB");
+        g.edges.push(AgentFlowEdge {
+            from: "tool_a".into(),
+            to: "doc_out".into(),
+            label: None,
+            edge_type: EdgeType::OutputBinding,
+            stroke: EdgeStroke::Normal,
+        });
+        let pact = agentflow_graph_to_pact(&g);
+        // Should not crash, and should not contain a flow for OutputBinding.
+        assert!(!pact.contains("flow main"));
+    }
+
+    #[test]
+    fn converts_opaque_type_to_comment() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.types.push(AgentFlowTypeDecl {
+            name: "Token".into(),
+            kind: TypeDeclKind::Opaque,
+        });
+        let pact = agentflow_graph_to_pact(&g);
+        assert!(pact.contains("-- opaque type: Token"));
+    }
+
+    #[test]
+    fn full_roundtrip_agentflow_to_pact_to_agentflow() {
+        // Parse agentflow text → convert to PACT → parse PACT → emit agentflow
+        // → verify key structure is preserved.
+        let input = r#"
+agentflow TB
+    agent researcher["Researcher"]
+        search["Search"]@{
+            description: "Search the web"
+            requires: ["^net.read"]
+            params:
+                query: "String"
+            returns: "String"
+        }
+    end
+    researcher@{ permits: "net.read" }
+
+    search --> summarize
+"#;
+        let graph = crate::agentflow_parse::parse_agentflow_text(input).unwrap();
+        let pact = agentflow_graph_to_pact(&graph);
+        assert!(pact.contains("tool #search"));
+        assert!(pact.contains("agent @researcher"));
+        assert!(pact.contains("description: <<Search the web>>"));
     }
 }

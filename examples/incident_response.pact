@@ -1,8 +1,9 @@
 -- Created: 2026-03-18
 -- Incident Response Pipeline
 -- Orchestrates 5 specialized AI agents through a 6-step incident response workflow.
--- Demonstrates: schemas, type aliases, templates, directives, multi-agent orchestration,
--- mock health-check polling, anomaly detection, and end-to-end incident lifecycle.
+-- Demonstrates: schemas, type aliases, templates, directives, skills, memory,
+-- multi-agent orchestration with fallbacks, pipelines, on_error handlers,
+-- tool retry/cache/validate, import, tests, and end-to-end incident lifecycle.
 --
 -- Usage (auto-detect from mock health data):
 --   pact run examples/incident_response.pact \
@@ -16,9 +17,21 @@
 --     --args "CRITICAL: API gateway p99 latency spike to 12s. 5xx error rate at 34%." \
 --     --dispatch claude
 
+import "shared/types.pact"
+
+-- ── Permission Tree ───────────────────────────────────────────
+
 permit_tree {
     ^llm {
         ^llm.query
+        ^llm.embed
+    }
+    ^net {
+        ^net.read
+    }
+    ^fs {
+        ^fs.read
+        ^fs.write
     }
 }
 
@@ -32,6 +45,7 @@ schema Incident {
     region :: String
     start_time :: String
     status :: String
+    assigned_to :: Optional<String>
 }
 
 schema Finding {
@@ -57,30 +71,39 @@ type IncidentStatus = Detected | Triaged | Investigating | Mitigating | Resolved
 -- ── Templates ───────────────────────────────────────────────────
 
 template %triage_result {
+    section IDENTIFICATION
     INCIDENT_ID :: String           <<generated incident ID, e.g. INC-2026-0318-001>>
     SEVERITY :: String              <<P0 through P4 with justification>>
     TITLE :: String                 <<concise incident title>>
+    section IMPACT
     AFFECTED_SERVICES :: String     <<comma-separated list of impacted services>>
     BLAST_RADIUS :: String          <<user-facing impact assessment>>
     INITIAL_HYPOTHESIS :: String    <<most likely failure mode based on alert signals>>
+    section RESPONSE
     ESCALATION :: String            <<who to page and why>>
     TIMELINE :: String * 3          <<Timestamp | Event | Source>>
 }
 
 template %investigation_report {
+    section OVERVIEW
     SUMMARY :: String               <<one paragraph executive summary>>
     METRICS_ANALYSIS :: String      <<what the metrics tell us — latency, error rates, throughput>>
+    section ANALYSIS
     DEPENDENCY_MAP :: String        <<upstream and downstream service dependencies>>
     ANOMALY :: String * 5           <<Timestamp | Service | Metric | Expected | Actual>>
     CORRELATION :: String           <<cross-service correlation analysis>>
+    section FINDINGS
     EVIDENCE :: String * 3          <<Finding category | Evidence | Confidence>>
 }
 
 template %runbook_format {
+    section SETUP
     OBJECTIVE :: String             <<what this runbook achieves>>
     PREREQUISITES :: String         <<required access and tools>>
+    section PROCEDURE
     STEP :: String * 8              <<Step # | Action | Command/Procedure | Rollback>>
     VERIFICATION :: String          <<how to confirm mitigation is working>>
+    section COMMUNICATION
     COMMUNICATION :: String         <<stakeholder update template>>
     ESCALATION_PATH :: String       <<when and how to escalate further>>
 }
@@ -117,7 +140,9 @@ tool #poll_health {
   {"service": "inventory-service", "status": "HEALTHY", "latency_p99_ms": 85, "error_rate_pct": 0.1, "region": "us-east-1", "timestamp": "2026-03-18T14:23:00Z"}
 ]
 Return this JSON exactly — do not modify or summarize it.>>
-    requires: [^llm.query]
+    requires: [^net.read]
+    retry: 3
+    cache: "5m"
     params {
         region :: String
     }
@@ -127,6 +152,7 @@ Return this JSON exactly — do not modify or summarize it.>>
 tool #detect_anomaly {
     description: <<You are an observability engineer analyzing raw health check data. Given JSON health-check results from multiple services, determine if there is an active incident. Compare each metric against normal baselines: p99 latency should be under 500ms, error rates should be under 2%, all services should report HEALTHY. If you detect anomalies, produce a single CRITICAL/WARNING/INFO alert string that summarizes ALL anomalies found — include specific service names, metric values, affected region, and timestamp. If everything looks normal, respond with just the word HEALTHY. Be precise and quantitative.>>
     requires: [^llm.query]
+    validate: strict
     params {
         health_data :: String
     }
@@ -185,52 +211,104 @@ tool #create_report {
     returns :: String
 }
 
+tool #notify_stakeholders {
+    description: <<Send incident notifications to stakeholders via configured channels.>>
+    requires: [^net.read]
+    handler: "http POST https://hooks.slack.example.com/incident"
+    retry: 2
+    params {
+        summary :: String
+        severity :: String
+        channel :: Optional<String>
+    }
+    returns :: String
+}
+
+tool #save_report {
+    description: <<Save an incident report to the file system.>>
+    requires: [^fs.write]
+    source: ^fs.write_file(path, content)
+    params {
+        path :: String
+        content :: String
+    }
+    returns :: String
+}
+
+-- ── Skills ──────────────────────────────────────────────────────
+
+skill $deep_investigation {
+    description: <<Perform a full incident investigation by analyzing the incident and determining root cause in sequence. Combines the analytical rigor of investigation with causal reasoning.>>
+    tools: [#analyze_incident, #root_cause_analysis]
+    strategy: <<sequential>>
+    params {
+        triage :: String
+    }
+    returns :: String
+}
+
 -- ── Agents ──────────────────────────────────────────────────────
 
 agent @sentinel {
-    permits: [^llm.query]
+    model: <<claude-sonnet-4-20250514>>
+    permits: [^net.read, ^llm.query]
     tools: [#poll_health, #detect_anomaly]
     prompt: <<You are an automated monitoring sentinel that continuously watches production infrastructure. When asked to check a region, first poll the health endpoints, then analyze the results for anomalies. If you detect an incident, produce a clear, actionable alert string. If everything is healthy, say HEALTHY. You are the first line of defense — false negatives are worse than false positives. Never claim you have saved, stored, sent, or emailed anything. You produce analysis text only.>>
 }
 
 agent @monitor {
+    model: <<claude-sonnet-4-20250514>>
     permits: [^llm.query]
     tools: [#triage_alert]
+    memory: [~incident_history]
     prompt: <<You are the on-call monitoring engineer. Your job is to rapidly assess incoming alerts, determine severity, and produce a structured triage assessment that enables the investigation team to begin work immediately. Be decisive — assign a clear severity level and don't hedge. Never claim you have saved, stored, sent, or emailed anything. You produce analysis text only.>>
 }
 
 agent @investigator {
+    model: <<claude-sonnet-4-20250514>>
     permits: [^llm.query]
     tools: [#analyze_incident, #root_cause_analysis]
+    skills: [$deep_investigation]
+    memory: [~incident_history, ~runbook_library]
     prompt: <<You are a senior SRE and distributed systems expert. You investigate incidents with the rigor of a forensic analyst. You think in terms of dependency graphs, failure domains, and cascade patterns. Your analysis is quantitative — you cite specific metrics, percentages, and timestamps. You distinguish correlation from causation. Never claim you have saved, stored, sent, or emailed anything. You produce analysis text only.>>
 }
 
 agent @responder {
+    model: <<claude-sonnet-4-20250514>>
     permits: [^llm.query]
     tools: [#generate_runbook]
+    memory: [~runbook_library]
     prompt: <<You are an incident commander with 10 years of SRE experience. You write runbooks that on-call engineers can execute at 3 AM without thinking. Every step is concrete, every command is copy-pasteable, every action has a rollback. You think about what can go wrong at each step. Never claim you have saved, stored, sent, or emailed anything. You produce analysis text only.>>
 }
 
 agent @reporter {
+    model: <<claude-sonnet-4-20250514>>
     permits: [^llm.query]
     tools: [#create_report]
     prompt: <<You are a frontend engineer who specializes in operational dashboards. You build data-dense, scannable interfaces that SRE teams rely on during incidents. Your HTML/CSS is production-quality — proper semantic markup, CSS Grid layouts, responsive design, smooth animations. You use inline SVG for status indicators and data visualization. Every pixel serves a purpose. Never output markdown — only raw HTML starting with DOCTYPE.>>
 }
 
-agent_bundle @incident_team {
-    agents: [@sentinel, @monitor, @investigator, @responder, @reporter]
+agent @ops {
+    model: <<claude-sonnet-4-20250514>>
+    permits: [^net.read, ^fs.write]
+    tools: [#notify_stakeholders, #save_report]
+    prompt: <<You are an operations automation agent. You handle external integrations: sending notifications to stakeholders and persisting reports to storage. Execute the requested operation and confirm completion. Never fabricate confirmation — report exactly what happened.>>
 }
 
--- ── Flow ────────────────────────────────────────────────────────
+agent_bundle @incident_team {
+    agents: [@sentinel, @monitor, @investigator, @responder, @reporter, @ops]
+    fallbacks: @investigator ?> @monitor
+}
 
+-- ── Flows ────────────────────────────────────────────────────────
+
+-- Core incident response: triage → investigate → root cause → runbook → report
 flow respond(alert :: String) -> String {
     -- Step 1: Triage — assess severity and blast radius
     triage = @monitor -> #triage_alert(alert)
 
-    -- Step 2: Investigate — deep-dive into metrics and dependencies
+    -- Step 2–3: Deep investigation — analyze and find root cause (uses skill)
     investigation = @investigator -> #analyze_incident(triage)
-
-    -- Step 3: Root cause — determine why this happened
     root_cause = @investigator -> #root_cause_analysis(investigation)
 
     -- Step 4: Runbook — actionable mitigation steps
@@ -242,14 +320,45 @@ flow respond(alert :: String) -> String {
     return dashboard
 }
 
--- Full pipeline: detect anomaly from health checks, then respond
+-- Full pipeline: detect → respond → notify → persist
 flow detect_and_respond(region :: String) -> String {
     -- Step 0: Poll health endpoints and detect anomalies
     health_data = @sentinel -> #poll_health(region)
     alert = @sentinel -> #detect_anomaly(health_data)
 
-    -- Steps 1-5: Full incident response pipeline
+    -- Steps 1–5: Full incident response pipeline
     dashboard = run respond(alert)
 
+    -- Step 6: Notify stakeholders (with error recovery)
+    notification = @ops -> #notify_stakeholders(alert, "P1") on_error <<Notification skipped — channel unavailable.>>
+
+    -- Step 7: Persist the dashboard report
+    saved = @ops -> #save_report("incident_report.html", dashboard) on_error <<Save skipped — disk unavailable.>>
+
     return dashboard
+}
+
+-- Quick pipeline: health check piped directly into anomaly detection
+flow quick_scan(region :: String) -> String {
+    result = @sentinel -> #poll_health(region) |> @sentinel -> #detect_anomaly(result)
+    return result
+}
+
+-- ── Tests ────────────────────────────────────────────────────────
+
+test "triage assigns severity" {
+    alert = "CRITICAL: API gateway p99 latency 12000ms, error rate 34.2% in us-east-1"
+    triage = @monitor -> #triage_alert(alert)
+    assert triage
+}
+
+test "health check returns valid JSON" {
+    data = @sentinel -> #poll_health("us-east-1")
+    assert data
+}
+
+test "full pipeline produces dashboard" {
+    alert = "WARNING: payment-service latency spike to 8500ms"
+    dashboard = run respond(alert)
+    assert dashboard
 }

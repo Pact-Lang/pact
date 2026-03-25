@@ -121,8 +121,16 @@ impl<'t> Parser<'t> {
                     kind: DeclKind::Connect(decl),
                 })
             }
+            TokenKind::Lesson => {
+                self.advance();
+                let decl = self.parse_lesson_decl()?;
+                Ok(Decl {
+                    span: span.merge(self.previous_span()),
+                    kind: DeclKind::Lesson(decl),
+                })
+            }
             _ => Err(ParseError::UnexpectedToken {
-                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect)"
+                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect, lesson)"
                     .to_string(),
                 found: self.peek_kind().describe().to_string(),
                 span: (span.start..span.end).into(),
@@ -853,6 +861,96 @@ impl<'t> Parser<'t> {
             params.push(DirectiveParam { name, ty, default });
         }
         Ok(params)
+    }
+
+    /// Parse `lesson "name" { context: <<...>> rule: <<...>> severity: ident }`.
+    fn parse_lesson_decl(&mut self) -> Result<LessonDecl, ParseError> {
+        let name = match self.peek_kind().clone() {
+            TokenKind::StringLit(s) => {
+                let s = s.clone();
+                self.advance();
+                s
+            }
+            _ => {
+                let span = self.current_span();
+                return Err(ParseError::UnexpectedToken {
+                    expected: "lesson name string".to_string(),
+                    found: self.peek_kind().describe().to_string(),
+                    span: (span.start..span.end).into(),
+                });
+            }
+        };
+
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut context = None;
+        let mut rule = None;
+        let mut severity = None;
+
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            // Lesson fields use contextual keywords (plain idents, not reserved keywords)
+            match self.peek_kind().clone() {
+                TokenKind::Ident(ref s) if s == "context" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    match self.peek_kind().clone() {
+                        TokenKind::PromptLit(s) | TokenKind::StringLit(s) => {
+                            context = Some(s.clone());
+                            self.advance();
+                        }
+                        _ => {
+                            let span = self.current_span();
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "context string or prompt literal".to_string(),
+                                found: self.peek_kind().describe().to_string(),
+                                span: (span.start..span.end).into(),
+                            });
+                        }
+                    }
+                }
+                TokenKind::Ident(ref s) if s == "rule" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    match self.peek_kind().clone() {
+                        TokenKind::PromptLit(s) | TokenKind::StringLit(s) => {
+                            rule = Some(s.clone());
+                            self.advance();
+                        }
+                        _ => {
+                            let span = self.current_span();
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "rule string or prompt literal".to_string(),
+                                found: self.peek_kind().describe().to_string(),
+                                span: (span.start..span.end).into(),
+                            });
+                        }
+                    }
+                }
+                TokenKind::Ident(ref s) if s == "severity" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    let sev = self.expect_ident("severity level (info, warning, error)")?;
+                    severity = Some(sev);
+                }
+                _ => {
+                    let span = self.current_span();
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "lesson field (context, rule, severity)".to_string(),
+                        found: self.peek_kind().describe().to_string(),
+                        span: (span.start..span.end).into(),
+                    });
+                }
+            }
+        }
+
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(LessonDecl {
+            name,
+            context,
+            rule,
+            severity,
+        })
     }
 
     /// Parse `template %name { ... }`.

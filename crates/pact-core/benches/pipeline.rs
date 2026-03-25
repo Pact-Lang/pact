@@ -14,7 +14,8 @@
 //!
 //! Run with: `cargo bench -p pact-core`
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 
 use pact_core::checker::Checker;
 use pact_core::interpreter::value::Value;

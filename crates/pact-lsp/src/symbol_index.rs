@@ -37,6 +37,8 @@ pub enum SymbolKind {
     TypeAlias,
     /// A permission tree declared with `permit_tree { ... }`.
     PermitTree,
+    /// A lesson declared with `lesson "name" { ... }`.
+    Lesson,
 }
 
 /// A recorded location in the source text.
@@ -318,6 +320,9 @@ impl Visitor for SymbolCollector {
             }
             DeclKind::PermitTree(_) => {
                 self.add_definition("permit_tree".into(), SymbolKind::PermitTree, &decl.span);
+            }
+            DeclKind::Lesson(l) => {
+                self.add_definition(l.name.clone(), SymbolKind::Lesson, &decl.span);
             }
             DeclKind::Test(_) | DeclKind::Import(_) | DeclKind::Connect(_) => {}
         }

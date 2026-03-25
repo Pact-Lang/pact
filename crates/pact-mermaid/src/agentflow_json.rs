@@ -40,7 +40,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn sample_graph() -> AgentFlowGraph {
-        let mut g = AgentFlowGraph::new("LR");
+        let mut g = AgentFlowGraph::new("TB");
         g.schemas.push(AgentFlowSchemaNode {
             id: "SiteConfig".to_string(),
             label: "SiteConfig".to_string(),
@@ -57,11 +57,12 @@ mod tests {
             label: "@researcher".to_string(),
             model: None,
             prompt: None,
+            permits: vec!["^net.read".to_string()],
             memory: vec![],
             nodes: vec![AgentFlowToolNode {
                 id: "research_location".to_string(),
                 label: "Research Location".to_string(),
-                shape: "roundedRect".to_string(),
+                shape: "subroutine".to_string(),
                 metadata: ToolMetadata {
                     description: "Research a city".to_string(),
                     requires: vec!["^net.read".to_string()],
@@ -84,6 +85,7 @@ mod tests {
             to: "write_copy".to_string(),
             label: None,
             edge_type: EdgeType::Flow,
+            stroke: EdgeStroke::Normal,
         });
         g
     }
@@ -94,7 +96,7 @@ mod tests {
         let json_str = agentflow_to_json_string(&graph);
         let back = parse_agentflow_json(&json_str).unwrap();
         assert_eq!(back.diagram_type, "agentflow");
-        assert_eq!(back.direction, "LR");
+        assert_eq!(back.direction, "TB");
         assert_eq!(back.schemas.len(), 1);
         assert_eq!(back.agents.len(), 1);
         assert_eq!(back.agents[0].nodes.len(), 1);
@@ -106,7 +108,7 @@ mod tests {
         let graph = sample_graph();
         let val = agentflow_to_json(&graph);
         assert_eq!(val["type"], "agentflow");
-        assert_eq!(val["direction"], "LR");
+        assert_eq!(val["direction"], "TB");
         assert!(val["agents"].is_array());
     }
 
@@ -128,5 +130,89 @@ mod tests {
         let graph = sample_graph();
         let json_str = agentflow_to_json_string(&graph);
         assert!(json_str.contains("\"type\": \"flow\""));
+    }
+
+    #[test]
+    fn all_edge_types_json_roundtrip() {
+        let mut g = AgentFlowGraph::new("TB");
+        let edge_types = vec![
+            EdgeType::Flow,
+            EdgeType::Reference,
+            EdgeType::OutputBinding,
+            EdgeType::Error,
+            EdgeType::Delegation,
+            EdgeType::Association,
+            EdgeType::Bidirectional,
+            EdgeType::Pipeline,
+        ];
+        for (i, et) in edge_types.into_iter().enumerate() {
+            g.edges.push(AgentFlowEdge {
+                from: format!("a{}", i),
+                to: format!("b{}", i),
+                label: None,
+                edge_type: et,
+                stroke: EdgeStroke::Normal,
+            });
+        }
+        let json_str = agentflow_to_json_string(&g);
+        let back = parse_agentflow_json(&json_str).unwrap();
+        assert_eq!(back.edges.len(), 8);
+        assert_eq!(back.edges[0].edge_type, EdgeType::Flow);
+        assert_eq!(back.edges[1].edge_type, EdgeType::Reference);
+        assert_eq!(back.edges[2].edge_type, EdgeType::OutputBinding);
+        assert_eq!(back.edges[3].edge_type, EdgeType::Error);
+        assert_eq!(back.edges[4].edge_type, EdgeType::Delegation);
+        assert_eq!(back.edges[5].edge_type, EdgeType::Association);
+        assert_eq!(back.edges[6].edge_type, EdgeType::Bidirectional);
+        assert_eq!(back.edges[7].edge_type, EdgeType::Pipeline);
+    }
+
+    #[test]
+    fn edge_stroke_json_roundtrip() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.edges.push(AgentFlowEdge {
+            from: "a".into(),
+            to: "b".into(),
+            label: None,
+            edge_type: EdgeType::Flow,
+            stroke: EdgeStroke::Thick,
+        });
+        g.edges.push(AgentFlowEdge {
+            from: "c".into(),
+            to: "d".into(),
+            label: None,
+            edge_type: EdgeType::Reference,
+            stroke: EdgeStroke::Dotted,
+        });
+        let json_str = agentflow_to_json_string(&g);
+        let back = parse_agentflow_json(&json_str).unwrap();
+        assert_eq!(back.edges[0].stroke, EdgeStroke::Thick);
+        assert_eq!(back.edges[1].stroke, EdgeStroke::Dotted);
+    }
+
+    #[test]
+    fn permits_and_types_json_roundtrip() {
+        let mut g = AgentFlowGraph::new("TB");
+        g.agents.push(AgentFlowAgent {
+            id: "test".into(),
+            label: "@test".into(),
+            model: None,
+            prompt: None,
+            permits: vec!["^net.read".into(), "^llm.query".into()],
+            memory: vec![],
+            nodes: vec![],
+            skills: vec![],
+        });
+        g.types.push(AgentFlowTypeDecl {
+            name: "Report".into(),
+            kind: TypeDeclKind::Record {
+                fields: BTreeMap::from([("title".into(), "String".into())]),
+            },
+        });
+        let json_str = agentflow_to_json_string(&g);
+        let back = parse_agentflow_json(&json_str).unwrap();
+        assert_eq!(back.agents[0].permits, vec!["^net.read", "^llm.query"]);
+        assert_eq!(back.types.len(), 1);
+        assert_eq!(back.types[0].name, "Report");
     }
 }
