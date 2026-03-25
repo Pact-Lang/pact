@@ -1,3 +1,17 @@
 /target
 /pact-out
 .env
+.claude/
+node_modules/
+*.vsix
+.DS_Store
+
+# Private/internal files
+generate_paper.py
+pact-lang-spec-v2.html
+website-content.md
+website-prompt.md
+showcase/
+PACT_AGENTFLOW_FEATURE_GAPS.md
+PACT_AGENTFLOW_RESPONSE.md
+AGENTFLOW-SYNTAX.md
