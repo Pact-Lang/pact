@@ -11,7 +11,11 @@ generate_paper.py
 pact-lang-spec-v2.html
 website-content.md
 website-prompt.md
-showcase/
 PACT_AGENTFLOW_FEATURE_GAPS.md
 PACT_AGENTFLOW_RESPONSE.md
 AGENTFLOW-SYNTAX.md
+
+# Showcase build artifacts
+showcase/*_out/
+showcase/*_report.html
+showcase/PACT_AGENTFLOW_FEATURE_GAPS.md

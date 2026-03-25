@@ -1,0 +1,356 @@
+agentflow TB
+  type Issue = Record {
+    affected_diagrams: List<String>
+    author_persona: String
+    comment_count: Int
+    commenter_personas: List<String>
+    id: Int
+    is_contribution_ready: Bool
+    is_regression: Bool
+    labels: List<String>
+    plus_ones: Int
+    title: String
+  }
+
+  type Persona = Record {
+    affected_diagrams: List<String>
+    author_count: Int
+    commenter_count: Int
+    issue_count: Int
+    key_needs: List<String>
+    name: String
+    share_pct: Float
+    weighted_impact: Int
+  }
+
+  type Theme = Record {
+    demand_heated: Int
+    demand_noticed: Int
+    demand_silent: Int
+    demand_wanted: Int
+    flags: List<String>
+    issue_count: Int
+    name: String
+    outcomes: List<String>
+    representative_issues: List<Int>
+    share_pct: Float
+    weighted_impact: Int
+  }
+
+  type RoadmapItem = Record {
+    issue_count: Int
+    key_personas: List<String>
+    priority: String
+    rationale: String
+    title: String
+    weighted_impact: Int
+  }
+
+  type OSTReport = Record {
+    cross_cutting_patterns: List<String>
+    personas: List<String>
+    regression_count: Int
+    roadmap_items: List<String>
+    themes: List<String>
+    total_issues: Int
+  }
+
+  type DemandLevel = Silent | Noticed | Wanted | Heated
+  type Priority = P0 | P1 | P2 | P3
+  type DiagramType = Flowchart | Sequence | Class | ER | State | Gantt | Mindmap | GitGraph | Block | Architecture | C4 | XYChart | Sankey | Pie | Timeline | Radar | Packet | ZenUML
+  type PersonaName = Developer | GeneralUser | TechnicalWriter | Architect | LibraryIntegrator | ProjectManager | DataAnalyst | Educator | Student | DevOpsEngineer | Designer
+
+
+agent ost_team["Ost Team"]
+
+    agent issue_collector["Issue Collector"]
+        fetch_issues
+        classify_issues
+        skill issue_classification["Issue Classification"]
+            #fetch_issues
+            #classify_issues
+        end
+        issue_classification@{
+          strategy: "Fetch all open issues first. Then classify in batches of 100 to
+    avoid context overflow. Use embeddings to detect duplicate/related issues
+    before classification."
+          params: "repo :: String"
+          returns: "List<Issue>"
+        }
+    end
+    issue_collector@{
+        model: "claude-sonnet-4-20250514"
+        permits: "net.read, llm.query, llm.embed"
+        prompt: "You are a GitHub issue analyst specializing in open-source project
+    triage. You fetch issues from repositories and classify them by type, affected
+    component, user persona, and engagement level. You are meticulous about data
+    quality — every issue must be classified consistently. You flag ambiguous cases
+    rather than guessing."
+    }
+
+    agent persona_analyst["Persona Analyst"]
+        profile_personas
+    end
+    persona_analyst@{
+        model: "claude-sonnet-4-20250514"
+        permits: "llm.query"
+        prompt: "You are a user research analyst who builds persona profiles from
+    quantitative data. You identify distinct user segments by their engagement
+    patterns, pain points, and needs. You distinguish between authors (who file
+    issues) and commenters (who amplify them). You always ground persona
+    descriptions in data, not stereotypes."
+    }
+
+    agent theme_analyst["Theme Analyst"]
+        cluster_themes
+        analyze_theme
+        find_cross_cutting
+        skill theme_deep_dive["Theme Deep Dive"]
+            #cluster_themes
+            #analyze_theme
+        end
+        theme_deep_dive@{
+          strategy: "First cluster all issues into themes. Then analyze each theme
+    independently, generating per-theme reports. Ensure theme analyses reference
+    each other for cross-cutting patterns."
+          params: "issues :: List<Issue>, personas :: List<Persona>"
+          returns: "List<Theme>"
+        }
+    end
+    theme_analyst@{
+        model: "claude-sonnet-4-20250514"
+        permits: "llm.query, llm.embed"
+        prompt: "You are a product strategy analyst who identifies themes and patterns
+    in issue backlogs. You use hierarchical clustering to group related issues,
+    compute demand profiles, and identify regression flags. You write community
+    signal summaries that capture the qualitative feel of engagement, and roadmap
+    signals that translate data into actionable priorities."
+    }
+
+    agent strategist["Strategist"]
+        score_impact
+        generate_report
+    end
+    strategist@{
+        model: "claude-sonnet-4-20250514"
+        permits: "llm.query"
+        prompt: "You are a product strategist who turns analysis into recommendations.
+    You score themes using weighted impact, persona coverage, and regression severity.
+    You assign P0/P1/P2 priorities and write clear rationale for each recommendation.
+    You balance quick wins against strategic bets. You write executive summaries
+    that decision-makers can act on immediately."
+    }
+
+    agent archivist["Archivist"]
+        save_report
+    end
+    archivist@{
+        permits: "db.write"
+        prompt: "You are a data steward. You persist analysis reports with version
+    metadata for longitudinal comparison. You never fabricate confirmations."
+    }
+    issue_collector --x persona_analyst
+    persona_analyst --x theme_analyst
+    theme_analyst --x strategist
+    strategist --x archivist
+  end
+  ost_team@{
+    view: collapsed
+    fallbacks: "issue_collector ?> persona_analyst ?> theme_analyst ?> strategist ?> archivist"
+  }
+
+directive data_driven["Data Driven"]
+end
+
+directive persona_centered["Persona Centered"]
+end
+persona_centered@{
+    params: "weighting_model :: String = engagement-weighted (comments + plus-ones + discussion)"
+}
+
+directive regression_aware["Regression Aware"]
+end
+
+regression_undercount["Regression Undercount"]
+regression_undercount@{ shape: lin-doc, severity: "warning", context: "Previous analysis underweighted regressions because they were counted
+    once per issue, not per affected diagram type. A rendering regression in flowcharts
+    affects 5x more users than one in packet diagrams.", rule: "Weight regression impact by diagram-type popularity: flowchart=5x,
+    sequence=3x, class/ER=2x, others=1x" }
+heated_signal_quality["Heated Signal Quality"]
+heated_signal_quality@{ shape: lin-doc, severity: "warning", context: "Early analysis treated all \"heated\" issues equally, but a heated
+    feature request (swimlanes, 4+ years open) carries different signal than a
+    heated regression (text overflow, 6 months).", rule: "Distinguish heated-by-demand (long-standing asks) from heated-by-pain
+    (recent breakage). Both matter but require different responses." }
+persona_overlap["Persona Overlap"]
+persona_overlap@{ shape: lin-doc, severity: "error", context: "Personas are not mutually exclusive — a developer can also be an
+    architect. The commenter pool especially shows cross-persona participation.
+    Treating personas as exclusive led to double-counting in impact analysis.", rule: "Use primary persona for authors, but distribute commenter weight across
+    all matching personas proportionally." }
+
+llm -->> llm_query
+llm -->> llm_embed
+net -->> net_read
+db -->> db_read
+db -->> db_write
+
+
+flow analyze_roadmap["Analyze Roadmap"]
+      direction TB
+      task analyze_roadmap_step1["Step 1"]
+        analyze_roadmap_agent_s1["issue_collector"] --- analyze_roadmap_fetch_issues_s1["fetch_issues"] --> analyze_roadmap_issues_s1["issues"]
+      end
+
+      task analyze_roadmap_step2["Step 2"]
+        analyze_roadmap_agent_s2["issue_collector"] --- analyze_roadmap_classify_issues_s2["classify_issues"] --> analyze_roadmap_classified_s2["classified"]
+      end
+
+      task analyze_roadmap_step3["Step 3"]
+        analyze_roadmap_agent_s3["persona_analyst"] --- analyze_roadmap_profile_personas_s3["profile_personas"] --> analyze_roadmap_personas_s3["personas"]
+      end
+
+      task analyze_roadmap_step4["Step 4"]
+        analyze_roadmap_agent_s4["theme_analyst"] --- analyze_roadmap_cluster_themes_s4["cluster_themes"] --> analyze_roadmap_themes_s4["themes"]
+      end
+
+      task analyze_roadmap_step5["Step 5"]
+        analyze_roadmap_agent_s5["strategist"] --- analyze_roadmap_score_impact_s5["score_impact"] --> analyze_roadmap_roadmap_s5["roadmap"]
+      end
+
+      task analyze_roadmap_step6["Step 6"]
+        analyze_roadmap_agent_s6["theme_analyst"] --- analyze_roadmap_find_cross_cutting_s6["find_cross_cutting"] --> analyze_roadmap_patterns_s6["patterns"]
+      end
+
+      task analyze_roadmap_step7["Step 7"]
+        analyze_roadmap_agent_s7["strategist"] --- analyze_roadmap_generate_report_s7["generate_report"] --> analyze_roadmap_report_s7["report"]
+      end
+
+      task analyze_roadmap_step8["Step 8"]
+        analyze_roadmap_agent_s8["archivist"] --- analyze_roadmap_save_report_s8["save_report"] --> analyze_roadmap_saved_s8["saved"]
+      end
+
+    analyze_roadmap_step1 -->|"issues"| analyze_roadmap_step2
+    analyze_roadmap_step2 -->|"classified"| analyze_roadmap_step3
+    analyze_roadmap_step3 -->|"personas"| analyze_roadmap_step4
+    analyze_roadmap_step4 -->|"themes"| analyze_roadmap_step5
+    analyze_roadmap_step5 -->|"roadmap"| analyze_roadmap_step6
+    analyze_roadmap_step6 -->|"patterns"| analyze_roadmap_step7
+    analyze_roadmap_step7 -->|"report"| analyze_roadmap_step8
+    analyze_roadmap_step3 -->|"classified"| analyze_roadmap_step4
+    analyze_roadmap_step4 -->|"personas"| analyze_roadmap_step5
+    analyze_roadmap_step5 -->|"themes"| analyze_roadmap_step6
+    analyze_roadmap_step5 -->|"classified"| analyze_roadmap_step6
+    analyze_roadmap_step6 -->|"personas"| analyze_roadmap_step7
+    analyze_roadmap_step6 -->|"themes"| analyze_roadmap_step7
+    analyze_roadmap_step6 -->|"roadmap"| analyze_roadmap_step7
+end
+  analyze_roadmap@{
+    params: "repo: String"
+    returns: "String"
+  }
+analyze_roadmap_fetch_issues_s1@{ shape: subroutine }
+analyze_roadmap_issues_s1@{ shape: doc }
+analyze_roadmap_classify_issues_s2@{ shape: subroutine }
+analyze_roadmap_classified_s2@{ shape: doc }
+analyze_roadmap_profile_personas_s3@{ shape: subroutine }
+analyze_roadmap_personas_s3@{ shape: doc }
+analyze_roadmap_cluster_themes_s4@{ shape: subroutine }
+analyze_roadmap_themes_s4@{ shape: doc }
+analyze_roadmap_score_impact_s5@{ shape: subroutine }
+analyze_roadmap_roadmap_s5@{ shape: doc }
+analyze_roadmap_find_cross_cutting_s6@{ shape: subroutine }
+analyze_roadmap_patterns_s6@{ shape: doc }
+analyze_roadmap_generate_report_s7@{ shape: subroutine }
+analyze_roadmap_report_s7@{ shape: doc }
+analyze_roadmap_save_report_s8@{ shape: subroutine }
+analyze_roadmap_saved_s8@{ shape: doc }
+
+flow quick_theme_check["Quick Theme Check"]
+      direction TB
+      task quick_theme_check_step1["Step 1"]
+        quick_theme_check_agent_s1["issue_collector"] --- quick_theme_check_fetch_issues_s1["fetch_issues"] --> quick_theme_check_issues_s1["issues"]
+      end
+
+      task quick_theme_check_step2["Step 2"]
+        quick_theme_check_agent_s2["issue_collector"] --- quick_theme_check_classify_issues_s2["classify_issues"] --> quick_theme_check_classified_s2["classified"]
+      end
+
+      task quick_theme_check_step3["Step 3"]
+        quick_theme_check_agent_s3["persona_analyst"] --- quick_theme_check_profile_personas_s3["profile_personas"] --> quick_theme_check_personas_s3["personas"]
+      end
+
+      task quick_theme_check_step4["Step 4"]
+        quick_theme_check_agent_s4["theme_analyst"] --- quick_theme_check_cluster_themes_s4["cluster_themes"] --> quick_theme_check_themes_s4["themes"]
+      end
+
+    quick_theme_check_step1 -->|"issues"| quick_theme_check_step2
+    quick_theme_check_step2 -->|"classified"| quick_theme_check_step3
+    quick_theme_check_step3 -->|"personas"| quick_theme_check_step4
+    quick_theme_check_step3 -->|"classified"| quick_theme_check_step4
+end
+  quick_theme_check@{
+    params: "repo: String, theme_name: String"
+    returns: "String"
+  }
+quick_theme_check_fetch_issues_s1@{ shape: subroutine }
+quick_theme_check_issues_s1@{ shape: doc }
+quick_theme_check_classify_issues_s2@{ shape: subroutine }
+quick_theme_check_classified_s2@{ shape: doc }
+quick_theme_check_profile_personas_s3@{ shape: subroutine }
+quick_theme_check_personas_s3@{ shape: doc }
+quick_theme_check_cluster_themes_s4@{ shape: subroutine }
+quick_theme_check_themes_s4@{ shape: doc }
+
+template ost_report {
+    section EXECUTIVE_SUMMARY
+    TOTAL_ISSUES: String           <<total open issues analyzed>>
+    TOP_THEMES: String * 3           <<Theme | Weighted Impact | Share>>
+    KEY_INSIGHT: String           <<one-paragraph synthesis>>
+    section PERSONAS
+    PERSONA_PROFILES: String * 11           <<Name | Issues | WI | Share | Key Needs>>
+    section THEMES
+    THEME_ANALYSES: String * 8           <<Theme | Issues | WI | Demand Profile | Outcomes>>
+    section ROADMAP
+    P0_ITEMS: String * 3           <<Title | Issues | WI | Rationale>>
+    P1_ITEMS: String * 3           <<Title | Issues | WI | Rationale>>
+    P2_ITEMS: String * 2           <<Title | Issues | WI | Rationale>>
+    section PATTERNS
+    DIAGRAM_CONCENTRATION: String * 5           <<Diagram | Issue Count | Primary Themes>>
+    REGRESSION_CLUSTERS: String * 4           <<Area | Issue Count | Impact>>
+    HEATED_DISTRIBUTION: String * 8           <<Theme | Heated Count | Share>>
+  }
+
+template theme_analysis {
+    THEME_NAME: String           <<theme title>>
+    ISSUE_COUNT: String           <<number of issues>>
+    WEIGHTED_IMPACT: String           <<calculated WI score>>
+    DEMAND_PROFILE: String           <<silent | noticed | wanted | heated breakdown>>
+    KEY_OUTCOMES: String * 6           <<Outcome | Issues | Impact | Diagrams | Personas>>
+    COMMUNITY_SIGNAL: String           <<qualitative engagement summary>>
+    ROADMAP_SIGNAL: String           <<prioritization recommendation>>
+    REPRESENTATIVE_ISSUES: String * 5           <<Issue # | Title | Demand Level>>
+  }
+
+testCase full_roadmap_analysis_produces_report["full roadmap analysis produces report"]
+  full_roadmap_analysis_produces_report_assertion["assert"]
+end
+full_roadmap_analysis_produces_report_assertion@{ shape: double-circle }
+full_roadmap_analysis_produces_report@{
+    assert: "full roadmap analysis produces report"
+}
+
+testCase issue_classification_returns_enriched_data["issue classification returns enriched data"]
+  issue_classification_returns_enriched_data_assertion["assert"]
+end
+issue_classification_returns_enriched_data_assertion@{ shape: double-circle }
+issue_classification_returns_enriched_data@{
+    assert: "issue classification returns enriched data"
+}
+
+testCase persona_profiling_covers_all_personas["persona profiling covers all personas"]
+  persona_profiling_covers_all_personas_assertion["assert"]
+end
+persona_profiling_covers_all_personas_assertion@{ shape: double-circle }
+persona_profiling_covers_all_personas@{
+    assert: "persona profiling covers all personas"
+}
+
