@@ -820,4 +820,58 @@ mod tests {
             _ => panic!("expected Agent"),
         }
     }
+
+    #[test]
+    fn parse_import_file() {
+        let src = r#"import "shared/types.pact""#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Import(i) => {
+                assert_eq!(i.path, "shared/types.pact");
+                assert_eq!(i.kind, crate::ast::stmt::ImportKind::File);
+            }
+            _ => panic!("expected Import"),
+        }
+    }
+
+    #[test]
+    fn parse_import_package() {
+        let src = r#"import "pkg:pact-std""#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Import(i) => {
+                assert_eq!(i.path, "pkg:pact-std");
+                match &i.kind {
+                    crate::ast::stmt::ImportKind::Package { name, version } => {
+                        assert_eq!(name, "pact-std");
+                        assert!(version.is_none());
+                    }
+                    _ => panic!("expected Package import kind"),
+                }
+            }
+            _ => panic!("expected Import"),
+        }
+    }
+
+    #[test]
+    fn parse_import_package_with_version() {
+        let src = r#"import "pkg:web-tools@^1.0""#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Import(i) => {
+                assert_eq!(i.path, "pkg:web-tools@^1.0");
+                match &i.kind {
+                    crate::ast::stmt::ImportKind::Package { name, version } => {
+                        assert_eq!(name, "web-tools");
+                        assert_eq!(version.as_deref(), Some("^1.0"));
+                    }
+                    _ => panic!("expected Package import kind"),
+                }
+            }
+            _ => panic!("expected Import"),
+        }
+    }
 }

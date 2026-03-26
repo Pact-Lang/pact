@@ -204,6 +204,21 @@ enum Command {
         #[command(subcommand)]
         action: McpAction,
     },
+
+    /// Install dependencies from Pact.toml.
+    Install,
+
+    /// Add a dependency to Pact.toml.
+    Add {
+        /// Package spec: "org/repo" or "org/repo@version".
+        package: String,
+    },
+
+    /// Search for PACT packages on GitHub.
+    Search {
+        /// Search query.
+        query: String,
+    },
 }
 
 /// MCP subcommands.
@@ -296,6 +311,9 @@ fn main() -> Result<()> {
         Command::Mcp { action } => match action {
             McpAction::ListTools { server, file } => cmd_mcp_list_tools(&server, &file),
         },
+        Command::Install => cmd_install(),
+        Command::Add { package } => cmd_add(&package),
+        Command::Search { query } => cmd_search(&query),
     }
 }
 
@@ -701,12 +719,7 @@ fn cmd_run(
     // Streaming mode: connect directly to the Anthropic streaming API
     // and print text deltas in real-time.
     if stream {
-        if dispatch != "claude" {
-            return Err(miette::miette!(
-                "--stream is only supported with --dispatch claude"
-            ));
-        }
-        return cmd_run_stream(path, flow_name, &arg_values, &program);
+        return cmd_run_stream(path, flow_name, &arg_values, &program, dispatch);
     }
 
     let rate_config = pact_dispatch::RateLimitConfig {
@@ -1031,9 +1044,8 @@ fn cmd_run_stream(
     flow_name: &str,
     arg_values: &[Value],
     program: &pact_core::ast::stmt::Program,
+    dispatch: &str,
 ) -> Result<()> {
-    use pact_build::emit_claude::build_agent_request;
-    use pact_build::emit_markdown::generate_agent_prompt;
     use pact_dispatch::StreamEvent;
     use std::io::Write;
 
@@ -1044,57 +1056,144 @@ fn cmd_run_stream(
     });
     let flow = flow.ok_or_else(|| miette::miette!("flow '{}' not found", flow_name))?;
 
-    // Find the first agent dispatch expression in the flow body.
-    // Flow body is Vec<Expr>; dispatches are AgentDispatch or Let bindings
-    // wrapping an AgentDispatch.
     let (agent_name, tool_name) = find_dispatch_in_exprs(&flow.body)
         .ok_or_else(|| miette::miette!("no agent dispatch found in flow '{}'", flow_name))?;
-
-    // Find the agent declaration
-    let agent_decl = program.decls.iter().find_map(|d| match &d.kind {
-        DeclKind::Agent(a) if a.name == agent_name => Some(a),
-        _ => None,
-    });
-    let agent_decl =
-        agent_decl.ok_or_else(|| miette::miette!("agent '{}' not found", agent_name))?;
-
-    // Format the user message from args
-    let user_message = pact_dispatch::convert::format_tool_call_message(&tool_name, arg_values);
-    let mut request = build_agent_request(agent_decl, program, &user_message);
-    request.system = Some(generate_agent_prompt(agent_decl, program));
-
-    // Create the client and run the stream
-    let client =
-        pact_dispatch::client::AnthropicClient::from_env().map_err(|e| miette::miette!("{e}"))?;
 
     let rt = tokio::runtime::Runtime::new()
         .into_diagnostic()
         .wrap_err("failed to create tokio runtime")?;
 
-    rt.block_on(async {
-        let mut rx = client
-            .send_message_stream(&request)
-            .await
-            .map_err(|e| miette::miette!("{e}"))?;
+    match dispatch {
+        "claude" => {
+            // Full streaming tool loop with multi-turn support
+            let agent_decl = program.decls.iter().find_map(|d| match &d.kind {
+                DeclKind::Agent(a) if a.name == agent_name => Some(a),
+                _ => None,
+            });
+            let agent_decl =
+                agent_decl.ok_or_else(|| miette::miette!("agent '{}' not found", agent_name))?;
 
-        while let Some(event) = rx.recv().await {
-            match event {
-                StreamEvent::TextDelta(text) => {
-                    eprint!("{}", text);
-                    std::io::stderr().flush().ok();
-                }
-                StreamEvent::ToolUseStart { name, .. } => {
-                    eprintln!("\n[stream] tool call: #{name}");
-                }
-                StreamEvent::MessageDone { stop_reason } => {
-                    eprintln!("\n[stream] done (stop_reason: {stop_reason:?})");
-                }
-                _ => {}
-            }
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(256);
+
+            rt.block_on(async {
+                let client = pact_dispatch::client::AnthropicClient::from_env()
+                    .map_err(|e| miette::miette!("{e}"))?;
+                let tool_loop = pact_dispatch::tool_loop::ToolUseLoop::new(client);
+
+                // Spawn the event printer on a separate task (rx is Send)
+                let printer_handle = tokio::spawn(async move {
+                    while let Some(event) = rx.recv().await {
+                        match event {
+                            StreamEvent::TextDelta(text) => {
+                                eprint!("{}", text);
+                                std::io::stderr().flush().ok();
+                            }
+                            StreamEvent::ToolUseStart { name, .. } => {
+                                eprintln!("\n[stream] tool call: #{name}");
+                            }
+                            StreamEvent::ToolExecuting { name } => {
+                                eprintln!("[stream] executing #{name}...");
+                            }
+                            StreamEvent::ToolResult { name, result } => {
+                                let preview = if result.len() > 100 {
+                                    format!("{}...", &result[..100])
+                                } else {
+                                    result
+                                };
+                                eprintln!("[stream] #{name} returned: {preview}");
+                            }
+                            StreamEvent::MessageDone { stop_reason } => {
+                                eprintln!("\n[stream] done (stop_reason: {stop_reason:?})");
+                            }
+                            StreamEvent::Error(msg) => {
+                                eprintln!("\n[stream] error: {msg}");
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+
+                // Run the dispatch on the current task (ToolUseLoop is not Send)
+                let result = tool_loop
+                    .dispatch_stream(agent_decl, program, &tool_name, arg_values, tx)
+                    .await;
+
+                // Wait for the printer to finish
+                let _ = printer_handle.await;
+
+                result
+                    .map(|_| ())
+                    .map_err(|e| miette::miette!("stream dispatch failed: {e}"))
+            })
         }
+        "openai" => {
+            let dispatcher =
+                pact_dispatch::OpenAIDispatcher::from_env().map_err(|e| miette::miette!("{e}"))?;
+            let prompt = format!(
+                "You are agent @{agent_name}. Execute tool #{tool_name} with arguments: {:?}",
+                arg_values
+            );
 
-        Ok(())
-    })
+            rt.block_on(async {
+                let mut rx = dispatcher
+                    .send_stream_events(&prompt)
+                    .await
+                    .map_err(|e| miette::miette!("{e}"))?;
+
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        StreamEvent::TextDelta(text) => {
+                            eprint!("{}", text);
+                            std::io::stderr().flush().ok();
+                        }
+                        StreamEvent::MessageDone { stop_reason } => {
+                            eprintln!("\n[stream] done (stop_reason: {stop_reason:?})");
+                        }
+                        StreamEvent::Error(msg) => {
+                            eprintln!("\n[stream] error: {msg}");
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            })
+        }
+        "ollama" => {
+            let dispatcher =
+                pact_dispatch::OllamaDispatcher::from_env().map_err(|e| miette::miette!("{e}"))?;
+            let prompt = format!(
+                "You are agent @{agent_name}. Execute tool #{tool_name} with arguments: {:?}",
+                arg_values
+            );
+
+            rt.block_on(async {
+                let mut rx = dispatcher
+                    .send_stream_events(&prompt)
+                    .await
+                    .map_err(|e| miette::miette!("{e}"))?;
+
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        StreamEvent::TextDelta(text) => {
+                            eprint!("{}", text);
+                            std::io::stderr().flush().ok();
+                        }
+                        StreamEvent::MessageDone { stop_reason } => {
+                            eprintln!("\n[stream] done (stop_reason: {stop_reason:?})");
+                        }
+                        StreamEvent::Error(msg) => {
+                            eprintln!("\n[stream] error: {msg}");
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            })
+        }
+        _ => Err(miette::miette!(
+            "--stream is not supported with --dispatch {dispatch}"
+        )),
+    }
 }
 
 /// Walk a slice of expressions to find the first `AgentDispatch`, returning
@@ -2159,4 +2258,177 @@ fn playground_type_expr(
             eprintln!("Error: {e}");
         }
     }
+}
+
+/// `pact install` — install dependencies from Pact.toml.
+fn cmd_install() -> Result<()> {
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    let manifest_dir = pact_registry::Manifest::find_upward(&cwd)
+        .ok_or_else(|| miette::miette!("no Pact.toml found in current or parent directories"))?;
+
+    let manifest =
+        pact_registry::Manifest::load(&manifest_dir).map_err(|e| miette::miette!("{e}"))?;
+
+    if manifest.dependencies.is_empty() {
+        println!("No dependencies to install.");
+        return Ok(());
+    }
+
+    println!(
+        "Installing {} dependencies...",
+        manifest.dependencies.len()
+    );
+
+    let rt = tokio::runtime::Runtime::new()
+        .into_diagnostic()
+        .wrap_err("failed to create tokio runtime")?;
+
+    rt.block_on(async {
+        let cache = pact_registry::Cache::new().map_err(|e| miette::miette!("{e}"))?;
+        let resolver = pact_registry::Resolver::new(cache);
+
+        // Check for existing lock file
+        let lockfile_path = manifest_dir.join("pact.lock");
+        let lockfile = if lockfile_path.exists() {
+            println!("Using existing pact.lock");
+            pact_registry::Lockfile::load(&lockfile_path).map_err(|e| miette::miette!("{e}"))?
+        } else {
+            println!("Resolving versions...");
+            let lf = resolver
+                .resolve(&manifest)
+                .await
+                .map_err(|e| miette::miette!("{e}"))?;
+            lf.save(&lockfile_path)
+                .map_err(|e| miette::miette!("{e}"))?;
+            println!("Created pact.lock");
+            lf
+        };
+
+        // Fetch packages into cache
+        resolver
+            .fetch(&lockfile)
+            .await
+            .map_err(|e| miette::miette!("{e}"))?;
+
+        for pkg in &lockfile.packages {
+            println!("  {} v{}", pkg.name, pkg.version);
+        }
+        println!("Done.");
+        Ok(())
+    })
+}
+
+/// `pact add <package>` — add a dependency to Pact.toml.
+fn cmd_add(package: &str) -> Result<()> {
+    let cwd = std::env::current_dir().into_diagnostic()?;
+    let manifest_dir = pact_registry::Manifest::find_upward(&cwd)
+        .ok_or_else(|| miette::miette!("no Pact.toml found in current or parent directories"))?;
+
+    let mut manifest =
+        pact_registry::Manifest::load(&manifest_dir).map_err(|e| miette::miette!("{e}"))?;
+
+    // Parse package spec: "org/repo" or "org/repo@version"
+    let (github, version) = if let Some(at_pos) = package.find('@') {
+        (
+            package[..at_pos].to_string(),
+            package[at_pos + 1..].to_string(),
+        )
+    } else {
+        (package.to_string(), "*".to_string())
+    };
+
+    // Extract short name from repo path
+    let name = github
+        .split('/')
+        .next_back()
+        .unwrap_or(&github)
+        .to_string();
+
+    if manifest.dependencies.contains_key(&name) {
+        println!("Dependency '{}' already exists, updating...", name);
+    }
+
+    manifest.dependencies.insert(
+        name.clone(),
+        pact_registry::manifest::Dependency {
+            github: github.clone(),
+            version: version.clone(),
+        },
+    );
+
+    manifest
+        .save(&manifest_dir)
+        .map_err(|e| miette::miette!("{e}"))?;
+    println!("Added {} ({}) @ {} to Pact.toml", name, github, version);
+
+    // Run install
+    cmd_install()
+}
+
+/// `pact search <query>` — search for PACT packages on GitHub.
+fn cmd_search(query: &str) -> Result<()> {
+    let rt = tokio::runtime::Runtime::new()
+        .into_diagnostic()
+        .wrap_err("failed to create tokio runtime")?;
+
+    rt.block_on(async {
+        dotenvy::dotenv().ok();
+        let token = std::env::var("GITHUB_TOKEN")
+            .or_else(|_| std::env::var("GITHUB_ACCESS_TOKEN"))
+            .ok();
+
+        let client = reqwest::Client::builder()
+            .user_agent("pact-registry/0.1")
+            .build()
+            .map_err(|e| miette::miette!("HTTP client error: {e}"))?;
+
+        let url = format!(
+            "https://api.github.com/search/repositories?q={}+topic:pact-lang&sort=stars&per_page=20",
+            urlencoding::encode(query)
+        );
+
+        let mut req = client.get(&url);
+        if let Some(t) = &token {
+            req = req.header("Authorization", format!("Bearer {t}"));
+        }
+
+        let response = req
+            .send()
+            .await
+            .map_err(|e| miette::miette!("search failed: {e}"))?;
+
+        if !response.status().is_success() {
+            return Err(miette::miette!(
+                "GitHub API error: {}",
+                response.status()
+            ));
+        }
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| miette::miette!("failed to parse response: {e}"))?;
+
+        let items = body["items"].as_array();
+        match items {
+            Some(repos) if !repos.is_empty() => {
+                println!("Found {} packages:\n", repos.len());
+                for repo in repos {
+                    let name = repo["full_name"].as_str().unwrap_or("unknown");
+                    let desc = repo["description"].as_str().unwrap_or("(no description)");
+                    let stars = repo["stargazers_count"].as_u64().unwrap_or(0);
+                    println!("  {} ({} stars)", name, stars);
+                    println!("    {}", desc);
+                    println!("    pact add {}\n", name);
+                }
+            }
+            _ => {
+                println!("No packages found matching '{}'.", query);
+                println!(
+                    "Tip: packages need the 'pact-lang' GitHub topic to appear in search."
+                );
+            }
+        }
+        Ok(())
+    })
 }

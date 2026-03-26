@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pact-core", "crates/pact-build", "crates/pact-dispatch", "crates/pact-cli", "crates/pact-mermaid", "crates/pact-mcp", "crates/pact-lsp", "crates/pact-wasm"]
+members = ["crates/pact-core", "crates/pact-build", "crates/pact-dispatch", "crates/pact-cli", "crates/pact-mermaid", "crates/pact-mcp", "crates/pact-lsp", "crates/pact-wasm", "crates/pact-registry"]
 resolver = "2"
 
 [workspace.metadata]

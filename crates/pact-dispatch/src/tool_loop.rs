@@ -100,6 +100,231 @@ impl ToolUseLoop {
             .await
     }
 
+    /// Execute a streaming agent dispatch through the tool-use loop.
+    ///
+    /// Like `dispatch`, but forwards [`StreamEvent`]s to the given channel
+    /// as they arrive, enabling real-time output. The method still handles
+    /// multi-turn tool-use cycles internally.
+    pub async fn dispatch_stream(
+        &self,
+        agent: &AgentDecl,
+        program: &Program,
+        tool_name: &str,
+        args: &[Value],
+        tx: tokio::sync::mpsc::Sender<crate::client::StreamEvent>,
+    ) -> Result<Value, DispatchError> {
+        let span = info_span!("dispatch_stream", agent = agent.name, tool = tool_name);
+        self.dispatch_stream_inner(agent, program, tool_name, args, tx)
+            .instrument(span)
+            .await
+    }
+
+    async fn dispatch_stream_inner(
+        &self,
+        agent: &AgentDecl,
+        program: &Program,
+        tool_name: &str,
+        args: &[Value],
+        tx: tokio::sync::mpsc::Sender<crate::client::StreamEvent>,
+    ) -> Result<Value, DispatchError> {
+        use crate::client::StreamEvent;
+
+        let mediator = RuntimeMediator::new(agent, program);
+
+        // Check rate limits before dispatching
+        if let Some(limiter) = &self.rate_limiter {
+            limiter
+                .check_agent_limit(&agent.name)
+                .map_err(DispatchError::RateLimit)?;
+            limiter
+                .check_global_limit()
+                .map_err(DispatchError::RateLimit)?;
+        }
+
+        // Build the initial request
+        let user_message = format_tool_call_message(tool_name, args);
+        let mut request = build_agent_request(agent, program, &user_message);
+        let system_prompt = generate_agent_prompt(agent, program);
+        request.system = Some(system_prompt);
+
+        let mut iteration = 0;
+
+        loop {
+            iteration += 1;
+            if iteration > self.max_iterations {
+                let _ = tx
+                    .send(StreamEvent::Error(format!(
+                        "max iterations ({}) exceeded",
+                        self.max_iterations
+                    )))
+                    .await;
+                return Err(DispatchError::Mediation(
+                    MediationError::MaxIterationsExceeded {
+                        count: self.max_iterations,
+                    },
+                ));
+            }
+
+            info!(
+                agent = agent.name,
+                iteration,
+                max = self.max_iterations,
+                "streaming loop iteration"
+            );
+
+            // Send streaming request
+            let mut rx = self.client.send_message_stream(&request).await?;
+
+            // Accumulate the response from the stream
+            let mut text_buffer = String::new();
+            let mut tool_uses: Vec<(String, String, String)> = Vec::new(); // (id, name, input_json)
+            let mut current_tool_id = String::new();
+            let mut current_tool_name = String::new();
+            let mut current_tool_input = String::new();
+            let mut stop_reason = StopReason::EndTurn;
+
+            while let Some(event) = rx.recv().await {
+                match &event {
+                    StreamEvent::TextDelta(text) => {
+                        text_buffer.push_str(text);
+                        let _ = tx.send(event).await;
+                    }
+                    StreamEvent::ToolUseStart { id, name } => {
+                        current_tool_id = id.clone();
+                        current_tool_name = name.clone();
+                        current_tool_input.clear();
+                        let _ = tx.send(event).await;
+                    }
+                    StreamEvent::ToolUseInputDelta(json) => {
+                        current_tool_input.push_str(json);
+                        let _ = tx.send(event).await;
+                    }
+                    StreamEvent::ContentBlockStop => {
+                        if !current_tool_name.is_empty() {
+                            tool_uses.push((
+                                current_tool_id.clone(),
+                                current_tool_name.clone(),
+                                current_tool_input.clone(),
+                            ));
+                            current_tool_name.clear();
+                            current_tool_input.clear();
+                        }
+                        let _ = tx.send(event).await;
+                    }
+                    StreamEvent::MessageDone { stop_reason: sr } => {
+                        stop_reason = sr.clone();
+                        // Don't forward MessageDone yet for tool_use — we continue the loop
+                    }
+                    _ => {}
+                }
+            }
+
+            match stop_reason {
+                StopReason::EndTurn | StopReason::StopSequence => {
+                    // Validate output
+                    if let Err(e) = mediator.validate_output(&text_buffer, tool_name, program) {
+                        let _ = tx.send(StreamEvent::Error(e.to_string())).await;
+                        return Err(DispatchError::Mediation(e));
+                    }
+
+                    let _ = tx
+                        .send(StreamEvent::MessageDone {
+                            stop_reason: stop_reason.clone(),
+                        })
+                        .await;
+                    return Ok(Value::ToolResult(text_buffer));
+                }
+                StopReason::ToolUse => {
+                    if tool_uses.is_empty() {
+                        return Err(DispatchError::ProtocolError(
+                            "stop_reason is tool_use but no tool_use blocks found".to_string(),
+                        ));
+                    }
+
+                    // Validate each tool use through mediation
+                    for (_id, name, input_str) in &tool_uses {
+                        let input: serde_json::Value =
+                            serde_json::from_str(input_str).unwrap_or(serde_json::json!({}));
+                        let block = ContentBlock::ToolUse {
+                            id: _id.clone(),
+                            name: name.clone(),
+                            input,
+                        };
+                        mediator
+                            .validate_tool_use(&block, program)
+                            .map_err(DispatchError::Mediation)?;
+                        mediator
+                            .validate_handler_permissions(name, program)
+                            .map_err(DispatchError::Mediation)?;
+                    }
+
+                    // Build assistant message for conversation history
+                    let mut assistant_content: Vec<serde_json::Value> = Vec::new();
+                    if !text_buffer.is_empty() {
+                        assistant_content.push(json!({"type": "text", "text": text_buffer}));
+                    }
+                    for (id, name, input_str) in &tool_uses {
+                        let input: serde_json::Value =
+                            serde_json::from_str(input_str).unwrap_or(serde_json::json!({}));
+                        assistant_content.push(
+                            json!({"type": "tool_use", "id": id, "name": name, "input": input}),
+                        );
+                    }
+
+                    request.messages.push(ClaudeMessage {
+                        role: "assistant".to_string(),
+                        content: json!(assistant_content),
+                    });
+
+                    // Execute tools and feed results back
+                    let mut tool_results: Vec<serde_json::Value> = Vec::new();
+                    for (id, name, input_str) in &tool_uses {
+                        let input: serde_json::Value =
+                            serde_json::from_str(input_str).unwrap_or(serde_json::json!({}));
+
+                        let _ = tx
+                            .send(StreamEvent::ToolExecuting { name: name.clone() })
+                            .await;
+
+                        let result = execute_tool(name, &input, program).await?;
+
+                        let _ = tx
+                            .send(StreamEvent::ToolResult {
+                                name: name.clone(),
+                                result: result.clone(),
+                            })
+                            .await;
+
+                        let tool_result = ToolResultContent::success(id, &result);
+                        tool_results.push(
+                            serde_json::to_value(&tool_result)
+                                .map_err(|e| DispatchError::ParseError(e.to_string()))?,
+                        );
+                    }
+
+                    request.messages.push(ClaudeMessage {
+                        role: "user".to_string(),
+                        content: json!(tool_results),
+                    });
+
+                    // Reset text buffer for next iteration
+                    text_buffer.clear();
+                }
+                StopReason::MaxTokens => {
+                    if !text_buffer.is_empty() {
+                        let _ = tx
+                            .send(StreamEvent::MessageDone {
+                                stop_reason: StopReason::MaxTokens,
+                            })
+                            .await;
+                        return Ok(Value::ToolResult(text_buffer));
+                    }
+                    return Err(DispatchError::MaxTokens);
+                }
+            }
+        }
+    }
+
     async fn dispatch_inner(
         &self,
         agent: &AgentDecl,

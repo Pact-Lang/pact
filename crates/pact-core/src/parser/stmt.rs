@@ -757,15 +757,32 @@ impl<'t> Parser<'t> {
         })
     }
 
-    /// Parse `import "path/to/file.pact"`.
+    /// Parse `import "path/to/file.pact"` or `import "pkg:name@version"`.
     fn parse_import_decl(&mut self, span: crate::span::Span) -> Result<ImportDecl, ParseError> {
+        use crate::ast::stmt::ImportKind;
         match self.peek_kind().clone() {
             TokenKind::StringLit(s) => {
                 let path = s.clone();
                 self.advance();
                 let decl_span = span.merge(self.previous_span());
+                let kind = if let Some(rest) = path.strip_prefix("pkg:") {
+                    if let Some(at_pos) = rest.find('@') {
+                        ImportKind::Package {
+                            name: rest[..at_pos].to_string(),
+                            version: Some(rest[at_pos + 1..].to_string()),
+                        }
+                    } else {
+                        ImportKind::Package {
+                            name: rest.to_string(),
+                            version: None,
+                        }
+                    }
+                } else {
+                    ImportKind::File
+                };
                 Ok(ImportDecl {
                     path,
+                    kind,
                     span: decl_span,
                 })
             }

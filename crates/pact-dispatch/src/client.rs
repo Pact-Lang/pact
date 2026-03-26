@@ -38,6 +38,20 @@ pub enum StreamEvent {
         /// Why the model stopped generating.
         stop_reason: StopReason,
     },
+    /// A tool is being executed (informational, for UI display).
+    ToolExecuting {
+        /// Name of the tool being executed.
+        name: String,
+    },
+    /// A tool execution completed with a result.
+    ToolResult {
+        /// Name of the tool that was executed.
+        name: String,
+        /// The text result from the tool.
+        result: String,
+    },
+    /// An error occurred during streaming.
+    Error(String),
 }
 
 /// HTTP client wrapper for the Anthropic Messages API.
@@ -377,5 +391,30 @@ mod tests {
         // Text content_block_start should return None (only tool_use is mapped)
         let text = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}";
         assert!(parse_sse_event(text).is_none());
+    }
+
+    #[test]
+    fn stream_event_tool_executing() {
+        let event = StreamEvent::ToolExecuting {
+            name: "search".to_string(),
+        };
+        assert!(matches!(event, StreamEvent::ToolExecuting { name } if name == "search"));
+    }
+
+    #[test]
+    fn stream_event_tool_result() {
+        let event = StreamEvent::ToolResult {
+            name: "search".to_string(),
+            result: "found 5 results".to_string(),
+        };
+        assert!(
+            matches!(event, StreamEvent::ToolResult { name, result } if name == "search" && result == "found 5 results")
+        );
+    }
+
+    #[test]
+    fn stream_event_error() {
+        let event = StreamEvent::Error("rate limited".to_string());
+        assert!(matches!(event, StreamEvent::Error(msg) if msg == "rate limited"));
     }
 }

@@ -63,7 +63,6 @@ struct GenerateResponse {
 
 /// A single streamed token from the Ollama `/api/generate` endpoint.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct GenerateStreamChunk {
     response: String,
     #[serde(default)]
@@ -151,8 +150,7 @@ impl OllamaDispatcher {
     }
 
     /// Send a streaming request to the Ollama API and collect the full response.
-    #[allow(dead_code)]
-    async fn send_request_streaming(&self, prompt: &str) -> Result<String, DispatchError> {
+    pub async fn send_request_streaming(&self, prompt: &str) -> Result<String, DispatchError> {
         let request = GenerateRequest {
             model: self.model.clone(),
             prompt: prompt.to_string(),
@@ -204,6 +202,77 @@ impl OllamaDispatcher {
         } else {
             Ok(collected)
         }
+    }
+
+    /// Send a streaming request and return a receiver of stream events.
+    pub async fn send_stream_events(
+        &self,
+        prompt: &str,
+    ) -> Result<tokio::sync::mpsc::Receiver<crate::client::StreamEvent>, DispatchError> {
+        use crate::client::StreamEvent;
+        use crate::types::StopReason;
+        use futures_util::StreamExt;
+
+        let (tx, rx) = tokio::sync::mpsc::channel(100);
+
+        let request = GenerateRequest {
+            model: self.model.clone(),
+            prompt: prompt.to_string(),
+            stream: true,
+        };
+
+        let url = format!("{}/api/generate", self.base_url);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| DispatchError::HttpError(e.to_string()))?;
+
+        let status = response.status().as_u16();
+        if status != 200 {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unknown".to_string());
+            return Err(DispatchError::ApiError { status, body });
+        }
+
+        let mut stream = response.bytes_stream();
+        tokio::spawn(async move {
+            let mut buffer = String::new();
+            while let Some(chunk) = stream.next().await {
+                if let Ok(bytes) = chunk {
+                    buffer.push_str(&String::from_utf8_lossy(&bytes));
+
+                    while let Some(pos) = buffer.find('\n') {
+                        let line = buffer[..pos].trim().to_string();
+                        buffer = buffer[pos + 1..].to_string();
+
+                        if line.is_empty() {
+                            continue;
+                        }
+                        if let Ok(chunk) = serde_json::from_str::<GenerateStreamChunk>(&line) {
+                            if !chunk.response.is_empty() {
+                                let _ = tx.send(StreamEvent::TextDelta(chunk.response)).await;
+                            }
+                            if chunk.done {
+                                let _ = tx
+                                    .send(StreamEvent::MessageDone {
+                                        stop_reason: StopReason::EndTurn,
+                                    })
+                                    .await;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        Ok(rx)
     }
 }
 

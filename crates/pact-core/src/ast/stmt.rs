@@ -210,11 +210,27 @@ pub struct DirectiveParam {
     pub default: Expr,
 }
 
+/// The kind of import: local file or registry package.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    /// A relative file import: `import "path/to/file.pact"`.
+    File,
+    /// A registry package import: `import "pkg:name"` or `import "pkg:name@^0.1"`.
+    Package {
+        /// Package name (e.g., `"pact-std"` from `"pkg:pact-std"`).
+        name: String,
+        /// Optional version constraint (e.g., `"^0.1"` from `"pkg:pact-std@^0.1"`).
+        version: Option<String>,
+    },
+}
+
 /// Import declaration fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportDecl {
-    /// The path to the imported file (relative to the importing file).
+    /// The raw path string from the source.
     pub path: String,
+    /// Whether this is a file or package import.
+    pub kind: ImportKind,
     /// Source span of the import declaration.
     pub span: Span,
 }

@@ -192,6 +192,30 @@ impl ClaudeDispatcher {
         self.rate_limiter = Some(limiter);
         self
     }
+
+    /// Dispatch with streaming, forwarding events through the channel.
+    ///
+    /// This runs the full tool-use loop with streaming enabled,
+    /// allowing callers to receive text deltas and tool execution
+    /// events in real-time.
+    pub fn dispatch_stream(
+        &self,
+        agent_name: &str,
+        tool_name: &str,
+        args: &[Value],
+        agent_decl: &AgentDecl,
+        program: &Program,
+        tx: tokio::sync::mpsc::Sender<client::StreamEvent>,
+    ) -> Result<Value, String> {
+        info!(agent = agent_name, tool = tool_name, "dispatching (stream)");
+
+        self.runtime
+            .block_on(
+                self.tool_loop
+                    .dispatch_stream(agent_decl, program, tool_name, args, tx),
+            )
+            .map_err(|e| e.to_string())
+    }
 }
 
 impl Dispatcher for ClaudeDispatcher {

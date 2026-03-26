@@ -26,10 +26,10 @@
 //! let program = loader.load(Path::new("main.pact"), &mut source_map).unwrap();
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::stmt::{DeclKind, Program};
+use crate::ast::stmt::{DeclKind, ImportKind, Program};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::span::SourceMap;
@@ -80,16 +80,35 @@ impl std::fmt::Display for LoadError {
 ///
 /// Resolves `import` declarations by reading, parsing, and merging imported
 /// files into a single program. Tracks loaded files to prevent circular imports.
+///
+/// For package imports (`import "pkg:name@version"`), the loader looks up
+/// pre-resolved package paths in its `package_paths` map. These must be
+/// populated before loading by the registry resolver.
 pub struct Loader {
     /// Canonical paths of files that have already been loaded.
     loaded: HashSet<PathBuf>,
+    /// Maps package names to their local filesystem entry file paths.
+    /// Populated by the registry resolver before loading.
+    package_paths: HashMap<String, PathBuf>,
 }
 
 impl Loader {
-    /// Create a new loader with no files loaded.
+    /// Create a new loader with no files loaded and no package paths.
     pub fn new() -> Self {
         Self {
             loaded: HashSet::new(),
+            package_paths: HashMap::new(),
+        }
+    }
+
+    /// Create a loader with pre-resolved package paths.
+    ///
+    /// The `packages` map should contain package names as keys and their
+    /// local filesystem entry file paths as values.
+    pub fn with_packages(packages: HashMap<String, PathBuf>) -> Self {
+        Self {
+            loaded: HashSet::new(),
+            package_paths: packages,
         }
     }
 
@@ -188,10 +207,25 @@ impl Loader {
         // Process declarations: resolve imports first, then collect non-import decls.
         for decl in program.decls {
             match &decl.kind {
-                DeclKind::Import(import) => {
-                    let import_path = base_dir.join(&import.path);
-                    self.load_recursive(&import_path, source_map, all_decls, errors);
-                }
+                DeclKind::Import(import) => match &import.kind {
+                    ImportKind::File => {
+                        let import_path = base_dir.join(&import.path);
+                        self.load_recursive(&import_path, source_map, all_decls, errors);
+                    }
+                    ImportKind::Package { name, .. } => {
+                        if let Some(local_path) = self.package_paths.get(name).cloned() {
+                            self.load_recursive(&local_path, source_map, all_decls, errors);
+                        } else {
+                            errors.push(LoadError::Io {
+                                path: PathBuf::from(&import.path),
+                                message: format!(
+                                    "package '{}' not found. Run 'pact install' to fetch dependencies",
+                                    name
+                                ),
+                            });
+                        }
+                    }
+                },
                 _ => {
                     all_decls.push(decl);
                 }
@@ -447,6 +481,64 @@ flow main() { return 1 }"#,
             .filter(|d| matches!(&d.kind, DeclKind::Tool(_)))
             .count();
         assert_eq!(tool_count, 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn package_import_with_resolved_path() {
+        let dir = create_test_dir("pkg-import");
+        let pkg_dir = dir.join("fake-pkg");
+        fs::create_dir_all(&pkg_dir).unwrap();
+
+        // Create a fake package file.
+        fs::write(
+            pkg_dir.join("main.pact"),
+            "agent @from_pkg { permits: [] tools: [] }",
+        )
+        .unwrap();
+
+        // Main file uses a package import.
+        fs::write(
+            dir.join("main.pact"),
+            r#"import "pkg:my-tools"
+flow hello() { return 1 }"#,
+        )
+        .unwrap();
+
+        let mut sm = SourceMap::new();
+        let mut packages = std::collections::HashMap::new();
+        packages.insert("my-tools".to_string(), pkg_dir.join("main.pact"));
+
+        let mut loader = Loader::with_packages(packages);
+        let program = loader.load(&dir.join("main.pact"), &mut sm).unwrap();
+
+        // agent from package + flow from main = 2
+        assert_eq!(program.decls.len(), 2);
+        assert!(matches!(&program.decls[0].kind, DeclKind::Agent(_)));
+        assert!(matches!(&program.decls[1].kind, DeclKind::Flow(_)));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn package_import_missing_errors() {
+        let dir = create_test_dir("pkg-missing");
+
+        fs::write(
+            dir.join("main.pact"),
+            r#"import "pkg:nonexistent"
+flow hello() { return 1 }"#,
+        )
+        .unwrap();
+
+        let mut sm = SourceMap::new();
+        let mut loader = Loader::new();
+        let result = loader.load(&dir.join("main.pact"), &mut sm);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].to_string().contains("nonexistent"));
 
         let _ = fs::remove_dir_all(&dir);
     }

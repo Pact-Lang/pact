@@ -435,8 +435,8 @@ Configure the LSP path in settings if needed:
 - [x] MCP server -- stdio and SSE transports
 - [x] WASM module -- run PACT in the browser and embed in other tools
 - [x] Mermaid agentflow diagrams -- bidirectional PACT-to-Mermaid conversion
-- [ ] Package registry -- share and reuse templates, directives, tools
-- [ ] Streaming responses -- real-time agent output
+- [x] Package registry -- share and reuse templates, directives, tools
+- [x] Streaming responses -- real-time agent output
 - [ ] Remote agent federation -- cross-network agent discovery and dispatch
 
 ## License
