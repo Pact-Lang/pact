@@ -4,7 +4,7 @@
 
 PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. Write once, deploy to **Claude, OpenAI, CrewAI, Cursor, and Gemini**. The result: AI agent systems you can reason about, audit, and trust.
 
-**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | MCP server | LSP + VS Code | Mermaid diagram export
+**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | MCP server | LSP + VS Code | WASM module | Mermaid agentflow diagrams
 
 ## Why PACT?
 
@@ -20,6 +20,8 @@ PACT is a **language**, not a library. Where frameworks bolt safety onto Python 
 | Composable prompts | Templates + Directives | String concatenation | String templates | String templates |
 | Source providers | Declarative (`source:`) | Raw HTTP calls | Manual | Manual |
 | Auto-guardrails | GDPR, HIPAA, PCI-DSS, SOX | Manual | None | None |
+| Diagram export | Mermaid agentflow (bidirectional) | None | None | None |
+| WASM support | Browser + embeddable module | None | None | None |
 | Tooling | LSP, VS Code, formatter, MCP | IDE plugins | None | None |
 
 ## Quick Start
@@ -421,12 +423,6 @@ Configure the LSP path in settings if needed:
 | `^time.now` | `^time.read` | Current timestamp |
 | `^json.parse` | `^json.parse` | Parse and validate JSON |
 
-## Suggested Repository Topics
-
-For GitHub discoverability, add these topics to the repository:
-
-`pact-lang` `ai-agents` `agent-orchestration` `llm-tool-calling` `multi-agent-systems` `agent-permissions` `compliance-framework` `openai-agents` `crewai` `cursor-rules` `gemini` `claude` `mcp-server` `agent-to-agent` `a2a-protocol` `type-safe` `programming-language` `rust`
-
 ## Roadmap
 
 - [x] Core language -- lexer, parser, checker, interpreter
@@ -437,10 +433,11 @@ For GitHub discoverability, add these topics to the repository:
 - [x] Compliance declarations -- risk tiers, audit levels, SOD roles, regulatory frameworks
 - [x] Agent cards -- A2A discovery JSON
 - [x] MCP server -- stdio and SSE transports
+- [x] WASM module -- run PACT in the browser and embed in other tools
+- [x] Mermaid agentflow diagrams -- bidirectional PACT-to-Mermaid conversion
 - [ ] Package registry -- share and reuse templates, directives, tools
 - [ ] Streaming responses -- real-time agent output
-- [ ] WASM module -- run PACT in the browser and embed in other tools
-- [ ] Visual editor -- drag-and-drop flow builder
+- [ ] Remote agent federation -- cross-network agent discovery and dispatch
 
 ## License
 
