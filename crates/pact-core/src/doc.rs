@@ -51,6 +51,7 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
             DeclKind::Import(_) => {}  // imports resolved by loader
             DeclKind::Connect(_) => {} // MCP connections are structural
             DeclKind::Lesson(_) => {}  // lessons handled separately
+            DeclKind::Federation(_) => {} // federation is structural
         }
     }
 

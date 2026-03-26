@@ -249,6 +249,41 @@ pub enum CheckError {
         #[label("declared here")]
         span: miette::SourceSpan,
     },
+
+    /// A federation registry URL is not a valid HTTP(S) URL.
+    #[error("invalid federation registry URL '{url}'")]
+    #[diagnostic(help("federation registry URLs must start with 'https://' or 'http://'"))]
+    InvalidFederationUrl {
+        /// The invalid URL.
+        url: String,
+        /// Location of the registry entry.
+        #[label("declared here")]
+        span: miette::SourceSpan,
+    },
+
+    /// A federation registry entry has no trust permissions.
+    #[error("federation registry '{url}' has empty trust permissions")]
+    #[diagnostic(help("add at least one permission to the trust list, e.g. trust: [^llm.query]"))]
+    EmptyFederationTrust {
+        /// The registry URL.
+        url: String,
+        /// Location of the registry entry.
+        #[label("declared here")]
+        span: miette::SourceSpan,
+    },
+
+    /// A remote agent endpoint URL is not a valid HTTP(S) URL.
+    #[error("agent '@{agent}' has invalid endpoint URL '{url}'")]
+    #[diagnostic(help("endpoint URLs must start with 'https://' or 'http://'"))]
+    InvalidAgentEndpoint {
+        /// The agent name.
+        agent: String,
+        /// The invalid URL.
+        url: String,
+        /// Location of the agent declaration.
+        #[label("declared here")]
+        span: miette::SourceSpan,
+    },
 }
 
 /// The semantic checker for PACT programs.
@@ -588,6 +623,23 @@ impl Checker {
                 DeclKind::Import(_) => {
                     // Imports are resolved by the loader before checking
                 }
+                DeclKind::Federation(f) => {
+                    // Validate federation registry URLs
+                    for entry in &f.registries {
+                        if !entry.url.starts_with("https://") && !entry.url.starts_with("http://") {
+                            self.errors.push(CheckError::InvalidFederationUrl {
+                                url: entry.url.clone(),
+                                span: (entry.span.start..entry.span.end).into(),
+                            });
+                        }
+                        if entry.trust.is_empty() {
+                            self.errors.push(CheckError::EmptyFederationTrust {
+                                url: entry.url.clone(),
+                                span: (entry.span.start..entry.span.end).into(),
+                            });
+                        }
+                    }
+                }
             }
         }
     }
@@ -645,6 +697,17 @@ impl Checker {
                                     span: (decl.span.start..decl.span.end).into(),
                                 });
                             }
+                        }
+                    }
+
+                    // Validate remote agent endpoint URL
+                    if let Some(ref url) = a.endpoint {
+                        if !url.starts_with("https://") && !url.starts_with("http://") {
+                            self.errors.push(CheckError::InvalidAgentEndpoint {
+                                agent: a.name.clone(),
+                                url: url.clone(),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
                         }
                     }
                 }
@@ -1469,5 +1532,76 @@ mod tests {
             "expected ComplianceSodConflict error, got: {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn checker_federation_valid() {
+        let src = r#"
+            federation {
+                "https://agents.example.com" trust: [^llm.query]
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn checker_federation_invalid_url() {
+        let src = r#"
+            federation {
+                "ftp://invalid.com" trust: [^llm.query]
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors.iter().any(|e| matches!(e, CheckError::InvalidFederationUrl { url, .. } if url == "ftp://invalid.com")),
+            "expected InvalidFederationUrl error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn checker_federation_empty_trust() {
+        let src = r#"
+            federation {
+                "https://agents.example.com" trust: []
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors.iter().any(|e| matches!(e, CheckError::EmptyFederationTrust { .. })),
+            "expected EmptyFederationTrust error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn checker_agent_invalid_endpoint() {
+        let src = r#"
+            agent @bot {
+                permits: []
+                tools: []
+                endpoint: "not-a-url"
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors.iter().any(|e| matches!(e, CheckError::InvalidAgentEndpoint { agent, url, .. } if agent == "bot" && url == "not-a-url")),
+            "expected InvalidAgentEndpoint error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn checker_agent_valid_endpoint() {
+        let src = r#"
+            agent @bot {
+                permits: []
+                tools: []
+                endpoint: "https://remote.example.com/agent"
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
     }
 }

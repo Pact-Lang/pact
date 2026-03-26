@@ -490,6 +490,9 @@ fn check_error_span(err: &CheckError) -> miette::SourceSpan {
         CheckError::InvalidComplianceAudit { span, .. } => *span,
         CheckError::UnknownCompliance { span, .. } => *span,
         CheckError::ComplianceSodConflict { span, .. } => *span,
+        CheckError::InvalidFederationUrl { span, .. } => *span,
+        CheckError::EmptyFederationTrust { span, .. } => *span,
+        CheckError::InvalidAgentEndpoint { span, .. } => *span,
     }
 }
 
@@ -887,6 +890,7 @@ fn find_hover_info(text: &str, offset: usize) -> Option<String> {
                 }
                 return Some(info);
             }
+            DeclKind::Federation(_) => {}
         }
     }
 

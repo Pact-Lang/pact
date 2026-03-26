@@ -192,6 +192,12 @@ pub enum TokenKind {
     Lesson,
     /// `compliance` — compliance declaration keyword
     Compliance,
+    /// `federation` — federation registry declaration keyword
+    Federation,
+    /// `endpoint` — remote agent endpoint keyword
+    Endpoint,
+    /// `trust` — federation trust permissions keyword
+    Trust,
 
     // ── Literals ───────────────────────────────────────────
     /// Integer literal, e.g. `42`
@@ -298,6 +304,9 @@ impl TokenKind {
             Self::Connect => "'connect'",
             Self::Lesson => "'lesson'",
             Self::Compliance => "'compliance'",
+            Self::Federation => "'federation'",
+            Self::Endpoint => "'endpoint'",
+            Self::Trust => "'trust'",
             Self::IntLit(_) => "integer",
             Self::FloatLit(_) => "float",
             Self::StringLit(_) => "string",

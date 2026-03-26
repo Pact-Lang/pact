@@ -138,8 +138,16 @@ impl<'t> Parser<'t> {
                     kind: DeclKind::Compliance(decl),
                 })
             }
+            TokenKind::Federation => {
+                self.advance();
+                let decl = self.parse_federation_decl()?;
+                Ok(Decl {
+                    span: span.merge(self.previous_span()),
+                    kind: DeclKind::Federation(decl),
+                })
+            }
             _ => Err(ParseError::UnexpectedToken {
-                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect, lesson, compliance)"
+                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect, lesson, compliance, federation)"
                     .to_string(),
                 found: self.peek_kind().describe().to_string(),
                 span: (span.start..span.end).into(),
@@ -160,6 +168,7 @@ impl<'t> Parser<'t> {
         let mut prompt = None;
         let mut memory = Vec::new();
         let mut compliance = None;
+        let mut endpoint = None;
 
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             match self.peek_kind().clone() {
@@ -222,10 +231,28 @@ impl<'t> Parser<'t> {
                         }
                     }
                 }
+                TokenKind::Endpoint => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    match self.peek_kind().clone() {
+                        TokenKind::StringLit(s) => {
+                            endpoint = Some(s.clone());
+                            self.advance();
+                        }
+                        _ => {
+                            let span = self.current_span();
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "endpoint URL string".to_string(),
+                                found: self.peek_kind().describe().to_string(),
+                                span: (span.start..span.end).into(),
+                            });
+                        }
+                    }
+                }
                 _ => {
                     let span = self.current_span();
                     return Err(ParseError::UnexpectedToken {
-                        expected: "agent field (permits, tools, skills, model, prompt, memory, compliance)"
+                        expected: "agent field (permits, tools, skills, model, prompt, memory, compliance, endpoint)"
                             .to_string(),
                         found: self.peek_kind().describe().to_string(),
                         span: (span.start..span.end).into(),
@@ -245,6 +272,7 @@ impl<'t> Parser<'t> {
             prompt,
             memory,
             compliance,
+            endpoint,
         })
     }
 
@@ -1134,6 +1162,49 @@ impl<'t> Parser<'t> {
             review_interval,
             roles,
         })
+    }
+
+    /// Parse `federation { "url" trust: [^perms] ... }`.
+    fn parse_federation_decl(&mut self) -> Result<FederationDecl, ParseError> {
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut registries = Vec::new();
+
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            let entry_span = self.current_span();
+            let url = match self.peek_kind().clone() {
+                TokenKind::StringLit(s) => {
+                    let s = s.clone();
+                    self.advance();
+                    s
+                }
+                _ => {
+                    let span = self.current_span();
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "registry URL string".to_string(),
+                        found: self.peek_kind().describe().to_string(),
+                        span: (span.start..span.end).into(),
+                    });
+                }
+            };
+
+            // Parse trust: [^perm1, ^perm2]
+            self.expect(&TokenKind::Trust)?;
+            self.expect(&TokenKind::Colon)?;
+            self.expect(&TokenKind::LBracket)?;
+            let trust = self.parse_comma_separated(|p| p.parse_expr(), &TokenKind::RBracket)?;
+            self.expect(&TokenKind::RBracket)?;
+
+            registries.push(FederationEntry {
+                url,
+                trust,
+                span: entry_span.merge(self.previous_span()),
+            });
+        }
+
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(FederationDecl { registries })
     }
 
     /// Parse `template %name { ... }`.

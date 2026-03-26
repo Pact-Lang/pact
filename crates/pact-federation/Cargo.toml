@@ -1,0 +1,17 @@
+[package]
+name = "pact-federation"
+version = "0.1.0"
+edition = "2021"
+authors = ["Gabriel Lars Sabadin"]
+description = "Remote agent federation — cross-network agent discovery and dispatch for PACT"
+license = "MIT"
+
+[dependencies]
+pact-core = { path = "../pact-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+thiserror = "2"
+tracing = "0.1"
+url = "2"

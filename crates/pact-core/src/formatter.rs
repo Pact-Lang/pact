@@ -143,6 +143,16 @@ impl Formatter {
                 self.push_line("}");
             }
             DeclKind::Compliance(c) => self.format_compliance(c),
+            DeclKind::Federation(f) => {
+                self.push_line("federation {");
+                self.indent();
+                for entry in &f.registries {
+                    self.push_line(&format!("\"{}\" trust: [{}]", entry.url,
+                        entry.trust.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>().join(", ")));
+                }
+                self.dedent();
+                self.push_line("}");
+            }
         }
     }
 

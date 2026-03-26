@@ -185,6 +185,16 @@ pub enum DeclKind {
     /// }
     /// ```
     Compliance(ComplianceDecl),
+
+    /// A federation declaration — remote agent discovery registries.
+    ///
+    /// ```pact
+    /// federation {
+    ///     "https://agents.example.com" trust: [^llm.query, ^net.read]
+    ///     "https://internal.corp/agents" trust: [^llm.query]
+    /// }
+    /// ```
+    Federation(FederationDecl),
 }
 
 /// Directive declaration — reusable prompt block with optional parameters.
@@ -358,6 +368,8 @@ pub struct AgentDecl {
     pub memory: Vec<Expr>,
     /// Optional compliance profile reference.
     pub compliance: Option<String>,
+    /// Optional remote endpoint URL for federated agents.
+    pub endpoint: Option<String>,
 }
 
 /// Agent bundle declaration fields.
@@ -509,6 +521,24 @@ pub struct TestDecl {
     pub description: String,
     /// Body expressions forming the test logic.
     pub body: Vec<Expr>,
+}
+
+/// Federation declaration — remote agent discovery registries with trust boundaries.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FederationDecl {
+    /// Registry entries with URLs and trust permissions.
+    pub registries: Vec<FederationEntry>,
+}
+
+/// A single federation registry entry.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FederationEntry {
+    /// Registry URL (e.g., `"https://agents.example.com"`).
+    pub url: String,
+    /// Trust permissions — the maximum permission set allowed for agents from this registry.
+    pub trust: Vec<Expr>,
+    /// Source span of this entry.
+    pub span: Span,
 }
 
 /// A complete PACT program (one source file).

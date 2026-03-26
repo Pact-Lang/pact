@@ -55,6 +55,8 @@ pub mod client;
 pub mod convert;
 /// Tool handler execution (HTTP, shell, builtin).
 pub mod executor;
+/// Federated agent dispatcher for cross-network agent dispatch.
+pub mod federated;
 /// MCP client for connecting to external MCP servers.
 pub mod mcp_client;
 /// Runtime compliance mediation and permission enforcement.
@@ -82,6 +84,7 @@ use std::sync::Arc;
 
 use client::AnthropicClient;
 pub use client::StreamEvent;
+pub use federated::FederatedDispatcher;
 pub use ollama::OllamaDispatcher;
 pub use openai::OpenAIDispatcher;
 use pact_core::ast::stmt::{AgentDecl, Program};

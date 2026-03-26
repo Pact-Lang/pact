@@ -874,4 +874,62 @@ mod tests {
             _ => panic!("expected Import"),
         }
     }
+
+    #[test]
+    fn parse_federation_block() {
+        let src = r#"federation {
+            "https://agents.example.com" trust: [^llm.query, ^net.read]
+            "https://internal.corp/agents" trust: [^llm]
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Federation(f) => {
+                assert_eq!(f.registries.len(), 2);
+                assert_eq!(f.registries[0].url, "https://agents.example.com");
+                assert_eq!(f.registries[0].trust.len(), 2);
+                assert_eq!(f.registries[1].url, "https://internal.corp/agents");
+                assert_eq!(f.registries[1].trust.len(), 1);
+            }
+            _ => panic!("expected Federation"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_with_endpoint() {
+        let src = r#"agent @remote_bot {
+            permits: [^llm.query]
+            tools: []
+            endpoint: "https://remote.example.com/agents/bot"
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Agent(a) => {
+                assert_eq!(a.name, "remote_bot");
+                assert_eq!(
+                    a.endpoint.as_deref(),
+                    Some("https://remote.example.com/agents/bot")
+                );
+            }
+            _ => panic!("expected Agent"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_without_endpoint() {
+        let src = r#"agent @local_bot {
+            permits: [^llm.query]
+            tools: []
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Agent(a) => {
+                assert_eq!(a.name, "local_bot");
+                assert!(a.endpoint.is_none());
+            }
+            _ => panic!("expected Agent"),
+        }
+    }
 }

@@ -4,7 +4,7 @@
 
 PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. Write once, deploy to **Claude, OpenAI, CrewAI, Cursor, and Gemini**. The result: AI agent systems you can reason about, audit, and trust.
 
-**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | MCP server | LSP + VS Code | WASM module | Mermaid agentflow diagrams
+**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | remote agent federation | package registry | streaming responses | MCP server | LSP + VS Code | WASM module | Mermaid agentflow diagrams
 
 ## Why PACT?
 
@@ -437,7 +437,7 @@ Configure the LSP path in settings if needed:
 - [x] Mermaid agentflow diagrams -- bidirectional PACT-to-Mermaid conversion
 - [x] Package registry -- share and reuse templates, directives, tools
 - [x] Streaming responses -- real-time agent output
-- [ ] Remote agent federation -- cross-network agent discovery and dispatch
+- [x] Remote agent federation -- cross-network agent discovery and dispatch
 
 ## License
 

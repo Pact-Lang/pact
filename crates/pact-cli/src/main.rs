@@ -219,6 +219,12 @@ enum Command {
         /// Search query.
         query: String,
     },
+
+    /// Federation operations — remote agent discovery and management.
+    Federation {
+        #[command(subcommand)]
+        action: FederationAction,
+    },
 }
 
 /// MCP subcommands.
@@ -231,6 +237,36 @@ enum McpAction {
 
         /// Path to the .pact file containing the connect block.
         #[arg(long)]
+        file: String,
+    },
+}
+
+/// Federation subcommands.
+#[derive(Subcommand)]
+enum FederationAction {
+    /// Discover remote agents from federation registries declared in a .pact file.
+    Discover {
+        /// Path to the .pact file containing a federation block.
+        file: String,
+
+        /// Optional agent name filter.
+        #[arg(long)]
+        query: Option<String>,
+    },
+
+    /// Register local agents with a remote federation registry.
+    Register {
+        /// Path to the .pact file containing agents to register.
+        file: String,
+
+        /// Registry URL to register agents with.
+        #[arg(long)]
+        registry: String,
+    },
+
+    /// Check the health of federation registries declared in a .pact file.
+    Health {
+        /// Path to the .pact file containing a federation block.
         file: String,
     },
 }
@@ -314,6 +350,11 @@ fn main() -> Result<()> {
         Command::Install => cmd_install(),
         Command::Add { package } => cmd_add(&package),
         Command::Search { query } => cmd_search(&query),
+        Command::Federation { action } => match action {
+            FederationAction::Discover { file, query } => cmd_federation_discover(&file, query.as_deref()),
+            FederationAction::Register { file, registry } => cmd_federation_register(&file, &registry),
+            FederationAction::Health { file } => cmd_federation_health(&file),
+        },
     }
 }
 
@@ -1348,6 +1389,7 @@ fn cmd_list_declarations(path: &str) -> Result<()> {
             DeclKind::Connect(_) => {}    // MCP connections
             DeclKind::Lesson(_) => {}     // Lessons are process memory
             DeclKind::Compliance(_) => {} // Compliance is governance metadata
+            DeclKind::Federation(_) => {} // Federation is structural
         }
     }
 
@@ -1975,6 +2017,7 @@ fn playground_list_decls(decls: &[Decl]) {
             DeclKind::Connect(_) => {}    // MCP connections are structural
             DeclKind::Lesson(_) => {}     // Lessons are process memory
             DeclKind::Compliance(_) => {} // Compliance is governance metadata
+            DeclKind::Federation(_) => {} // Federation is structural
         }
     }
 
@@ -2128,6 +2171,7 @@ fn playground_eval(
                 }
                 DeclKind::Lesson(l) => println!("Defined lesson \"{}\"", l.name),
                 DeclKind::Compliance(c) => println!("Defined compliance \"{}\"", c.name),
+                DeclKind::Federation(f) => println!("Defined federation with {} registries", f.registries.len()),
             }
         }
 
@@ -2429,6 +2473,259 @@ fn cmd_search(query: &str) -> Result<()> {
                 );
             }
         }
+        Ok(())
+    })
+}
+
+// ── Federation commands ─────────────────────────────────────────────────────
+
+/// Extract federation registries from a loaded program.
+fn extract_federation_registries(
+    program: &pact_core::ast::stmt::Program,
+) -> Vec<(String, Vec<String>)> {
+    use pact_core::ast::expr::ExprKind;
+
+    let mut registries = Vec::new();
+    for decl in &program.decls {
+        if let DeclKind::Federation(f) = &decl.kind {
+            for entry in &f.registries {
+                let perms: Vec<String> = entry
+                    .trust
+                    .iter()
+                    .filter_map(|e| match &e.kind {
+                        ExprKind::PermissionRef(segs) => Some(segs.join(".")),
+                        _ => None,
+                    })
+                    .collect();
+                registries.push((entry.url.clone(), perms));
+            }
+        }
+    }
+    registries
+}
+
+/// Discover remote agents from federation registries.
+fn cmd_federation_discover(file: &str, query: Option<&str>) -> Result<()> {
+    let (program, _sm) = load_and_check(file)?;
+    let registries = extract_federation_registries(&program);
+
+    if registries.is_empty() {
+        println!("No federation registries declared in '{}'.", file);
+        println!("Add a federation block:");
+        println!();
+        println!("  federation {{");
+        println!("      \"https://registry.example.com\" trust: [^llm.query]");
+        println!("  }}");
+        return Ok(());
+    }
+
+    println!("Discovering agents from {} registries...", registries.len());
+    println!();
+
+    let rt = tokio::runtime::Runtime::new()
+        .into_diagnostic()
+        .wrap_err("failed to create runtime")?;
+
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .into_diagnostic()?;
+
+        for (url, trust_perms) in &registries {
+            println!("Registry: {}", url);
+            println!("  Trust: [{}]", trust_perms.iter().map(|p| format!("^{p}")).collect::<Vec<_>>().join(", "));
+
+            let mut discover_url = format!("{url}/discover");
+            if let Some(q) = query {
+                discover_url = format!("{discover_url}?query={}", urlencoding::encode(q));
+            }
+
+            match client.get(&discover_url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(body) => {
+                            if let Some(agents) = body.get("agents").and_then(|a| a.as_array()) {
+                                if agents.is_empty() {
+                                    println!("  No agents found.");
+                                } else {
+                                    for agent in agents {
+                                        let name = agent.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                                        let desc = agent.get("description").and_then(|d| d.as_str()).unwrap_or("");
+                                        let endpoint = agent.get("endpoint").and_then(|e| e.as_str()).unwrap_or("?");
+                                        let perms: Vec<&str> = agent
+                                            .get("permissions")
+                                            .and_then(|p| p.as_array())
+                                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                                            .unwrap_or_default();
+
+                                        // Check trust boundary.
+                                        let within_trust = perms.iter().all(|perm| {
+                                            trust_perms.iter().any(|trusted| {
+                                                *perm == trusted.as_str()
+                                                    || perm.starts_with(&format!("{trusted}."))
+                                            })
+                                        });
+
+                                        let trust_marker = if within_trust { "OK" } else { "UNTRUSTED" };
+                                        println!("  @{name} [{trust_marker}]");
+                                        if !desc.is_empty() {
+                                            println!("    {desc}");
+                                        }
+                                        println!("    endpoint: {endpoint}");
+                                        if !perms.is_empty() {
+                                            println!(
+                                                "    permits: [{}]",
+                                                perms.iter().map(|p| format!("^{p}")).collect::<Vec<_>>().join(", ")
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => println!("  Error parsing response: {e}"),
+                    }
+                }
+                Ok(resp) => println!("  Error: HTTP {}", resp.status()),
+                Err(e) => println!("  Unreachable: {e}"),
+            }
+            println!();
+        }
+
+        Ok(())
+    })
+}
+
+/// Register local agents with a remote federation registry.
+fn cmd_federation_register(file: &str, registry_url: &str) -> Result<()> {
+    let (program, _sm) = load_and_check(file)?;
+
+    use pact_core::ast::expr::ExprKind;
+
+    let mut agents_registered = 0;
+
+    let rt = tokio::runtime::Runtime::new()
+        .into_diagnostic()
+        .wrap_err("failed to create runtime")?;
+
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .into_diagnostic()?;
+
+        for decl in &program.decls {
+            if let DeclKind::Agent(a) = &decl.kind {
+                let perms: Vec<String> = a
+                    .permits
+                    .iter()
+                    .filter_map(|e| match &e.kind {
+                        ExprKind::PermissionRef(segs) => Some(segs.join(".")),
+                        _ => None,
+                    })
+                    .collect();
+
+                let tools: Vec<serde_json::Value> = a
+                    .tools
+                    .iter()
+                    .filter_map(|e| match &e.kind {
+                        ExprKind::ToolRef(name) => Some(serde_json::json!({
+                            "name": name,
+                        })),
+                        _ => None,
+                    })
+                    .collect();
+
+                let description = a.prompt.as_ref().and_then(|p| match &p.kind {
+                    ExprKind::PromptLit(s) => Some(s.clone()),
+                    _ => None,
+                });
+
+                let endpoint = a.endpoint.clone().unwrap_or_default();
+
+                let card = serde_json::json!({
+                    "card": {
+                        "name": a.name,
+                        "description": description,
+                        "endpoint": endpoint,
+                        "permissions": perms,
+                        "tools": tools,
+                        "compliance": a.compliance,
+                    }
+                });
+
+                let url = format!("{registry_url}/register");
+                println!("Registering @{} with {}...", a.name, registry_url);
+
+                match client.post(&url).json(&card).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        println!("  Registered @{}", a.name);
+                        agents_registered += 1;
+                    }
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let body = resp.text().await.unwrap_or_default();
+                        println!("  Failed: HTTP {} — {}", status, body);
+                    }
+                    Err(e) => println!("  Failed: {}", e),
+                }
+            }
+        }
+
+        if agents_registered == 0 {
+            println!("No agents found in '{}'.", file);
+        } else {
+            println!("\nRegistered {} agent(s).", agents_registered);
+        }
+
+        Ok(())
+    })
+}
+
+/// Check health of federation registries declared in a .pact file.
+fn cmd_federation_health(file: &str) -> Result<()> {
+    let (program, _sm) = load_and_check(file)?;
+    let registries = extract_federation_registries(&program);
+
+    if registries.is_empty() {
+        println!("No federation registries declared in '{}'.", file);
+        return Ok(());
+    }
+
+    let rt = tokio::runtime::Runtime::new()
+        .into_diagnostic()
+        .wrap_err("failed to create runtime")?;
+
+    rt.block_on(async {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .into_diagnostic()?;
+
+        for (url, trust_perms) in &registries {
+            print!("{url} ... ");
+
+            let health_url = format!("{url}/health");
+            match client.get(&health_url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.json::<serde_json::Value>().await {
+                        Ok(body) => {
+                            let status = body.get("status").and_then(|s| s.as_str()).unwrap_or("unknown");
+                            let version = body.get("version").and_then(|v| v.as_str()).unwrap_or("?");
+                            let count = body.get("agent_count").and_then(|c| c.as_u64()).unwrap_or(0);
+                            println!(
+                                "OK (status={status}, version={version}, agents={count}, trust=[{}])",
+                                trust_perms.iter().map(|p| format!("^{p}")).collect::<Vec<_>>().join(", ")
+                            );
+                        }
+                        Err(e) => println!("ERROR parsing response: {e}"),
+                    }
+                }
+                Ok(resp) => println!("ERROR HTTP {}", resp.status()),
+                Err(e) => println!("UNREACHABLE: {e}"),
+            }
+        }
+
         Ok(())
     })
 }

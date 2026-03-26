@@ -297,6 +297,7 @@ fn handle_list(args: &Value) -> Result<String, String> {
                 let risk = c.risk.as_deref().unwrap_or("unspecified");
                 lines.push(format!("compliance \"{}\" (risk: {})", c.name, risk));
             }
+            DeclKind::Federation(_) => {}
         }
     }
 

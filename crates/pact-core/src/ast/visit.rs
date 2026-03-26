@@ -86,6 +86,7 @@ pub trait Visitor {
             DeclKind::Connect(_) => {}
             DeclKind::Lesson(_) => {}
             DeclKind::Compliance(_) => {}
+            DeclKind::Federation(_) => {}
         }
     }
 

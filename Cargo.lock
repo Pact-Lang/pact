@@ -1671,6 +1671,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pact-federation"
+version = "0.1.0"
+dependencies = [
+ "pact-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "pact-lang"
 version = "0.1.0"
 dependencies = [

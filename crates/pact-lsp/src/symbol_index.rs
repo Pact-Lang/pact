@@ -329,6 +329,7 @@ impl Visitor for SymbolCollector {
             DeclKind::Compliance(c) => {
                 self.add_definition(c.name.clone(), SymbolKind::Compliance, &decl.span);
             }
+            DeclKind::Federation(_) => {}
             DeclKind::Test(_) | DeclKind::Import(_) | DeclKind::Connect(_) => {}
         }
 
