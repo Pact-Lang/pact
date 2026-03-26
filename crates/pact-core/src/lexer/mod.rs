@@ -393,6 +393,7 @@ impl<'src> Lexer<'src> {
             "cache" => TokenKind::Cache,
             "connect" => TokenKind::Connect,
             "lesson" => TokenKind::Lesson,
+            "compliance" => TokenKind::Compliance,
             _ => TokenKind::Ident(text.to_string()),
         };
 

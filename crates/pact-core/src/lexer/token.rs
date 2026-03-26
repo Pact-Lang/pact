@@ -190,6 +190,8 @@ pub enum TokenKind {
     Connect,
     /// `lesson` — lesson declaration keyword
     Lesson,
+    /// `compliance` — compliance declaration keyword
+    Compliance,
 
     // ── Literals ───────────────────────────────────────────
     /// Integer literal, e.g. `42`
@@ -295,6 +297,7 @@ impl TokenKind {
             Self::Cache => "'cache'",
             Self::Connect => "'connect'",
             Self::Lesson => "'lesson'",
+            Self::Compliance => "'compliance'",
             Self::IntLit(_) => "integer",
             Self::FloatLit(_) => "float",
             Self::StringLit(_) => "string",

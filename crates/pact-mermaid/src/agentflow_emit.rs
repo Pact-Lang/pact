@@ -238,21 +238,25 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
                 let test_id = format!("test_{}", graph.tests.len() + 1);
 
                 // Extract dispatch/flow targets from test body for linking.
+                let mut seen_targets = std::collections::HashSet::new();
                 for expr in &t.body {
                     for target in extract_test_targets(expr) {
-                        graph.edges.push(AgentFlowEdge {
-                            from: test_id.clone(),
-                            to: target,
-                            label: None,
-                            edge_type: EdgeType::Reference,
-                            stroke: EdgeStroke::Dotted,
-                        });
+                        if seen_targets.insert(target.clone()) {
+                            graph.edges.push(AgentFlowEdge {
+                                from: test_id.clone(),
+                                to: target,
+                                label: None,
+                                edge_type: EdgeType::Reference,
+                                stroke: EdgeStroke::Dotted,
+                            });
+                        }
                     }
                 }
 
+                let test_num = graph.tests.len() + 1;
                 graph.tests.push(AgentFlowTestCase {
                     id: test_id,
-                    label: t.description.clone(),
+                    label: format!("Test {test_num}"),
                     assertions: vec![],
                     metadata: TestMetadata {
                         assert_expr: Some(t.description.clone()),
@@ -263,6 +267,7 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
             DeclKind::PermitTree(pt) => {
                 emit_permit_tree_edges(&mut graph.edges, &pt.nodes, None);
             }
+            DeclKind::Compliance(_) => {} // Compliance metadata — not emitted in agentflow
             _ => {}
         }
     }

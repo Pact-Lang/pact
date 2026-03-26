@@ -4,12 +4,19 @@
 
 //! # pact-build
 //!
-//! Compiler backend for the PACT language. Generates deployment artifacts
-//! from a checked AST:
+//! Multi-target compiler backend for the PACT language. Generates deployment
+//! artifacts from a checked AST for five platforms:
 //!
-//! - **TOML configs** — agent, tool, flow, and permission definitions
+//! - **Claude** — Anthropic `tool_use` JSON (`input_schema`)
+//! - **OpenAI** — Function calling JSON (`parameters`, `strict: true`)
+//! - **CrewAI** — YAML agent/task configuration
+//! - **Cursor** — `.cursorrules` + `.cursor/mcp.json`
+//! - **Gemini** — Google function declarations (uppercase types)
+//!
+//! All targets also produce:
+//! - **TOML configs** — agent, tool, flow, skill, and permission definitions
 //! - **Markdown prompts** — system prompts for each agent
-//! - **Claude tool_use JSON** — Anthropic-compatible tool definitions
+//! - **Agent cards** — A2A discovery JSON (opt-in via `--agent-cards`)
 //!
 //! ## Architecture
 //!
@@ -18,10 +25,11 @@
 //!                                      ├── pact.toml
 //!                                      ├── agents/
 //!                                      │   ├── <name>.toml
-//!                                      │   └── <name>.prompt.md
+//!                                      │   ├── <name>.prompt.md
+//!                                      │   └── <name>.agent_card.json  (--agent-cards)
 //!                                      ├── tools/
 //!                                      │   ├── <name>.toml
-//!                                      │   └── claude_tools.json
+//!                                      │   └── <target>_tools.json
 //!                                      ├── flows/
 //!                                      │   └── <name>.toml
 //!                                      └── permissions.toml
@@ -34,7 +42,9 @@
 //! use pact_core::ast::stmt::Program;
 //!
 //! # fn example(program: Program) -> Result<(), pact_build::BuildError> {
+//! // Build for any supported target
 //! let config = BuildConfig::new("example.pact", "./pact-out", Target::Claude);
+//! // Also: Target::OpenAI, Target::CrewAI, Target::Cursor, Target::Gemini
 //! build(&program, &config)?;
 //! # Ok(())
 //! # }
@@ -44,12 +54,24 @@
 pub mod builtins;
 /// Build configuration and target selection.
 pub mod config;
+/// Agent card JSON emission for A2A discovery.
+pub mod emit_agent_card;
 /// Claude tool_use JSON emission.
 pub mod emit_claude;
 /// CLAUDE.md process memory generation.
 pub mod emit_claude_md;
+/// Shared utilities for JSON schema generation.
+pub mod emit_common;
+/// CrewAI YAML configuration emission.
+pub mod emit_crewai;
+/// Cursor rules and MCP configuration emission.
+pub mod emit_cursor;
+/// Google Gemini function declarations emission.
+pub mod emit_gemini;
 /// Markdown prompt generation.
 pub mod emit_markdown;
+/// OpenAI function-calling JSON emission.
+pub mod emit_openai;
 /// Claude Code skill file generation.
 pub mod emit_skill;
 /// TOML configuration emission.
@@ -122,10 +144,32 @@ pub fn build(program: &Program, config: &BuildConfig) -> Result<(), BuildError> 
         }
     }
 
-    // Write Claude tools JSON (if target is Claude)
-    if config.target == config::Target::Claude {
-        let claude_json = emit_claude::generate_claude_tools_json(program);
-        std::fs::write(config.tools_dir().join("claude_tools.json"), claude_json)?;
+    // Write target-specific tool definitions
+    match config.target {
+        config::Target::Claude => {
+            let json = emit_claude::generate_claude_tools_json(program);
+            std::fs::write(config.tools_dir().join("claude_tools.json"), json)?;
+        }
+        config::Target::OpenAI => {
+            let json = emit_openai::generate_openai_tools_json(program);
+            std::fs::write(config.tools_dir().join("openai_tools.json"), json)?;
+        }
+        config::Target::CrewAI => {
+            let yaml = emit_crewai::generate_crewai_config(program);
+            std::fs::write(config.out_dir.join("crew.yaml"), yaml)?;
+        }
+        config::Target::Cursor => {
+            let rules = emit_cursor::generate_cursor_rules(program);
+            std::fs::write(config.out_dir.join(".cursorrules"), rules)?;
+            let mcp = emit_cursor::generate_cursor_mcp_json(program);
+            let cursor_dir = config.out_dir.join(".cursor");
+            std::fs::create_dir_all(&cursor_dir)?;
+            std::fs::write(cursor_dir.join("mcp.json"), mcp)?;
+        }
+        config::Target::Gemini => {
+            let json = emit_gemini::generate_gemini_tools_json(program);
+            std::fs::write(config.tools_dir().join("gemini_tools.json"), json)?;
+        }
     }
 
     // Write skill configs
@@ -175,6 +219,15 @@ pub fn build(program: &Program, config: &BuildConfig) -> Result<(), BuildError> 
     if config.emit_mcp_recommendations {
         let md = mcp_recommend::generate_recommendations_md(program);
         std::fs::write(config.out_dir.join("mcp_recommendations.md"), md)?;
+    }
+
+    // Write agent card JSON files (--agent-cards)
+    if config.emit_agent_cards {
+        for (filename, content) in
+            emit_agent_card::generate_all_agent_cards(program, config.source_name())
+        {
+            std::fs::write(config.agents_dir().join(filename), content)?;
+        }
     }
 
     Ok(())
@@ -258,5 +311,138 @@ mod tests {
         let config = BuildConfig::new("empty.pact", "/tmp/empty", Target::Claude);
         let result = build(&program, &config);
         assert!(matches!(result, Err(BuildError::EmptyProgram)));
+    }
+
+    /// Shared source for multi-target build tests.
+    fn multi_target_src() -> &'static str {
+        r#"
+            tool #greet {
+                description: <<Generate a greeting.>>
+                requires: [^llm.query]
+                params { name :: String }
+                returns :: String
+            }
+            agent @greeter {
+                permits: [^llm.query]
+                tools: [#greet]
+                model: "claude-sonnet-4-20250514"
+                prompt: <<You are a friendly greeter.>>
+            }
+            flow hello(name :: String) -> String {
+                result = @greeter -> #greet(name)
+                return result
+            }
+        "#
+    }
+
+    #[test]
+    fn build_openai_target() {
+        let program = parse_program(multi_target_src());
+        let tmp = std::env::temp_dir().join("pact-build-test-openai");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let config = BuildConfig::new("test.pact", &tmp, Target::OpenAI);
+        build(&program, &config).unwrap();
+
+        let json_path = tmp.join("tools/openai_tools.json");
+        assert!(json_path.exists(), "openai_tools.json should exist");
+
+        let json = std::fs::read_to_string(&json_path).unwrap();
+        assert!(
+            json.contains("\"function\""),
+            "OpenAI tools JSON should contain \"function\" wrapper"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn build_crewai_target() {
+        let program = parse_program(multi_target_src());
+        let tmp = std::env::temp_dir().join("pact-build-test-crewai");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let config = BuildConfig::new("test.pact", &tmp, Target::CrewAI);
+        build(&program, &config).unwrap();
+
+        let yaml_path = tmp.join("crew.yaml");
+        assert!(yaml_path.exists(), "crew.yaml should exist");
+
+        let yaml = std::fs::read_to_string(&yaml_path).unwrap();
+        assert!(
+            yaml.contains("agent") || yaml.contains("task"),
+            "crew.yaml should contain agent or task entries"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn build_cursor_target() {
+        let program = parse_program(multi_target_src());
+        let tmp = std::env::temp_dir().join("pact-build-test-cursor");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let config = BuildConfig::new("test.pact", &tmp, Target::Cursor);
+        build(&program, &config).unwrap();
+
+        assert!(
+            tmp.join(".cursorrules").exists(),
+            ".cursorrules should exist"
+        );
+        assert!(
+            tmp.join(".cursor/mcp.json").exists(),
+            ".cursor/mcp.json should exist"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn build_gemini_target() {
+        let program = parse_program(multi_target_src());
+        let tmp = std::env::temp_dir().join("pact-build-test-gemini");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let config = BuildConfig::new("test.pact", &tmp, Target::Gemini);
+        build(&program, &config).unwrap();
+
+        let json_path = tmp.join("tools/gemini_tools.json");
+        assert!(json_path.exists(), "gemini_tools.json should exist");
+
+        let json = std::fs::read_to_string(&json_path).unwrap();
+        assert!(
+            json.contains("STRING") || json.contains("OBJECT") || json.contains("NUMBER"),
+            "Gemini tools JSON should contain uppercase types"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn build_with_agent_cards() {
+        let program = parse_program(multi_target_src());
+        let tmp = std::env::temp_dir().join("pact-build-test-agent-cards");
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        let mut config = BuildConfig::new("test.pact", &tmp, Target::Claude);
+        config.emit_agent_cards = true;
+        build(&program, &config).unwrap();
+
+        let agents_dir = tmp.join("agents");
+        let has_agent_card = std::fs::read_dir(&agents_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .ends_with(".agent_card.json")
+            });
+        assert!(
+            has_agent_card,
+            "agents/ should contain an .agent_card.json file"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

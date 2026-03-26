@@ -39,6 +39,8 @@ pub enum SymbolKind {
     PermitTree,
     /// A lesson declared with `lesson "name" { ... }`.
     Lesson,
+    /// A compliance profile declared with `compliance "name" { ... }`.
+    Compliance,
 }
 
 /// A recorded location in the source text.
@@ -323,6 +325,9 @@ impl Visitor for SymbolCollector {
             }
             DeclKind::Lesson(l) => {
                 self.add_definition(l.name.clone(), SymbolKind::Lesson, &decl.span);
+            }
+            DeclKind::Compliance(c) => {
+                self.add_definition(c.name.clone(), SymbolKind::Compliance, &decl.span);
             }
             DeclKind::Test(_) | DeclKind::Import(_) | DeclKind::Connect(_) => {}
         }

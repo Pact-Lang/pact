@@ -23,9 +23,9 @@
 //! }
 //! ```
 
+use crate::emit_common::type_to_json_schema;
 use pact_core::ast::expr::ExprKind;
 use pact_core::ast::stmt::{AgentDecl, DeclKind, DirectiveDecl, Program, TemplateDecl, ToolDecl};
-use pact_core::ast::types::TypeExprKind;
 use pact_core::template::render_template;
 use serde::Serialize;
 use serde_json::{json, Value as JsonValue};
@@ -238,38 +238,6 @@ pub fn build_agent_request(
             role: "user".to_string(),
             content: json!(user_message),
         }],
-    }
-}
-
-/// Convert a PACT type expression to a JSON Schema type.
-fn type_to_json_schema(ty: &pact_core::ast::types::TypeExpr) -> JsonValue {
-    match &ty.kind {
-        TypeExprKind::Named(name) => match name.as_str() {
-            "String" => json!({"type": "string"}),
-            "Int" => json!({"type": "integer"}),
-            "Float" => json!({"type": "number"}),
-            "Bool" => json!({"type": "boolean"}),
-            "Any" => json!({}),
-            _ => json!({"type": "string"}),
-        },
-        TypeExprKind::Generic { name, args } => match name.as_str() {
-            "List" => {
-                let items = args
-                    .first()
-                    .map(type_to_json_schema)
-                    .unwrap_or_else(|| json!({}));
-                json!({"type": "array", "items": items})
-            }
-            "Map" => {
-                let value_type = args
-                    .get(1)
-                    .map(type_to_json_schema)
-                    .unwrap_or_else(|| json!({}));
-                json!({"type": "object", "additionalProperties": value_type})
-            }
-            _ => json!({"type": "object"}),
-        },
-        TypeExprKind::Optional(inner) => type_to_json_schema(inner),
     }
 }
 

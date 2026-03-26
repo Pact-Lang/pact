@@ -14,6 +14,14 @@ use std::path::PathBuf;
 pub enum Target {
     /// Generate Claude/Anthropic-compatible tool definitions.
     Claude,
+    /// Generate OpenAI Agents SDK function-calling definitions.
+    OpenAI,
+    /// Generate CrewAI YAML agent/task configuration.
+    CrewAI,
+    /// Generate Cursor rules and MCP configuration.
+    Cursor,
+    /// Generate Google Gemini function declarations.
+    Gemini,
 }
 
 impl Target {
@@ -21,6 +29,10 @@ impl Target {
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "claude" | "anthropic" => Some(Self::Claude),
+            "openai" | "gpt" => Some(Self::OpenAI),
+            "crewai" | "crew" => Some(Self::CrewAI),
+            "cursor" => Some(Self::Cursor),
+            "gemini" | "google" => Some(Self::Gemini),
             _ => None,
         }
     }
@@ -29,7 +41,16 @@ impl Target {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Claude => "claude",
+            Self::OpenAI => "openai",
+            Self::CrewAI => "crewai",
+            Self::Cursor => "cursor",
+            Self::Gemini => "gemini",
         }
+    }
+
+    /// Return all supported target names for help text.
+    pub fn all_names() -> &'static [&'static str] {
+        &["claude", "openai", "crewai", "cursor", "gemini"]
     }
 }
 
@@ -48,6 +69,8 @@ pub struct BuildConfig {
     pub emit_claude_md: bool,
     /// Whether to emit MCP server recommendations.
     pub emit_mcp_recommendations: bool,
+    /// Whether to emit agent card JSON files for A2A discovery.
+    pub emit_agent_cards: bool,
 }
 
 impl BuildConfig {
@@ -64,6 +87,7 @@ impl BuildConfig {
             emit_claude_skill: false,
             emit_claude_md: false,
             emit_mcp_recommendations: false,
+            emit_agent_cards: false,
         }
     }
 
@@ -130,6 +154,13 @@ mod tests {
         assert_eq!(Target::parse("claude"), Some(Target::Claude));
         assert_eq!(Target::parse("Claude"), Some(Target::Claude));
         assert_eq!(Target::parse("anthropic"), Some(Target::Claude));
+        assert_eq!(Target::parse("openai"), Some(Target::OpenAI));
+        assert_eq!(Target::parse("gpt"), Some(Target::OpenAI));
+        assert_eq!(Target::parse("crewai"), Some(Target::CrewAI));
+        assert_eq!(Target::parse("crew"), Some(Target::CrewAI));
+        assert_eq!(Target::parse("cursor"), Some(Target::Cursor));
+        assert_eq!(Target::parse("gemini"), Some(Target::Gemini));
+        assert_eq!(Target::parse("google"), Some(Target::Gemini));
         assert_eq!(Target::parse("unknown"), None);
     }
 

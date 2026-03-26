@@ -1,8 +1,10 @@
 # PACT -- Programmable Agent Contract Toolkit
 
-> A typed, permission-enforced language for orchestrating AI agents.
+> A typed, permission-enforced language for AI agent orchestration, multi-agent systems, and LLM tool calling -- with built-in compliance, agent-to-agent discovery, and multi-target builds.
 
-PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. The result: AI agent systems you can reason about, audit, and trust.
+PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. Write once, deploy to **Claude, OpenAI, CrewAI, Cursor, and Gemini**. The result: AI agent systems you can reason about, audit, and trust.
+
+**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | MCP server | LSP + VS Code | Mermaid diagram export
 
 ## Why PACT?
 
@@ -12,11 +14,13 @@ PACT is a **language**, not a library. Where frameworks bolt safety onto Python 
 | Type safety | Built-in (`::`) | None | None | None |
 | Permission system | First-class (`^`) | Manual | None | None |
 | Agent contracts | Enforced at compile-time | Runtime only | Runtime only | Runtime only |
+| Compliance declarations | Built-in (risk tiers, audit, SOD) | Manual | None | None |
+| Multi-target build | Claude, OpenAI, CrewAI, Cursor, Gemini | N/A | N/A | N/A |
+| Agent discovery (A2A) | Agent cards JSON | None | None | None |
 | Composable prompts | Templates + Directives | String concatenation | String templates | String templates |
 | Source providers | Declarative (`source:`) | Raw HTTP calls | Manual | Manual |
-| Auto-guardrails | GDPR, HIPAA, PCI-DSS | Manual | None | None |
-| Multi-backend | Claude, OpenAI, Ollama | Many | OpenAI | Many |
-| Tooling | LSP, VS Code, formatter | IDE plugins | None | None |
+| Auto-guardrails | GDPR, HIPAA, PCI-DSS, SOX | Manual | None | None |
+| Tooling | LSP, VS Code, formatter, MCP | IDE plugins | None | None |
 
 ## Quick Start
 
@@ -29,6 +33,9 @@ pact init my_agent.pact
 
 # Type-check a contract
 pact check examples/hello_agent.pact
+
+# Build for a specific target
+pact build app.pact --target openai
 
 # Run with Claude
 export ANTHROPIC_API_KEY=sk-...
@@ -127,6 +134,39 @@ tool #save_to_disk {
 
 This is caught at **compile time** -- before any API call, before any file is touched.
 
+### Compliance Declarations
+
+PACT supports first-class compliance declarations for regulatory frameworks. Attach a compliance block to any agent to enforce risk tiers, audit levels, separation of duties, and data retention policies:
+
+```pact
+compliance "payment_processing" {
+    risk: high
+    frameworks: [pci_dss, gdpr, sox]
+    audit: full
+    retention: "7y"
+    review_interval: "90d"
+    roles {
+        approver: "finance_lead"
+        executor: "payment_agent"
+        auditor: "compliance_team"
+    }
+}
+
+agent @payment_processor {
+    permits: [^pay.charge]
+    tools: [#process_payment]
+    compliance: "payment_processing"
+}
+```
+
+**Risk tiers** classify agents by operational risk: `low`, `medium`, `high`, `critical`. Higher tiers trigger stricter mediation at runtime.
+
+**Audit levels** control logging granularity: `none` (no audit trail), `summary` (outcome logging), `full` (every tool call, input, and output recorded).
+
+**Separation of duties (SOD)** prevents a single agent or user from holding conflicting roles. The `roles` block defines `approver`, `executor`, and `auditor` -- the checker enforces that no single identity fills more than one role.
+
+**Regulatory frameworks** (`pci_dss`, `gdpr`, `sox`, `hipaa`, `coppa`, `ccpa`) activate domain-specific guardrails at build time. Combine multiple frameworks in a single declaration.
+
 ### Templates -- Structured Output
 
 Templates define reusable output schemas that tools must conform to:
@@ -212,6 +252,69 @@ flow safe_search(query :: String) -> String {
 }
 ```
 
+## Multi-Target Build
+
+PACT compiles to multiple backend formats from a single source file. Write your agent contracts once and deploy to any supported platform:
+
+```bash
+pact build app.pact --target claude    # Anthropic Claude tool_use JSON
+pact build app.pact --target openai    # OpenAI function calling JSON
+pact build app.pact --target crewai    # CrewAI YAML (agents + tasks)
+pact build app.pact --target cursor    # .cursorrules + .cursor/mcp.json
+pact build app.pact --target gemini    # Google Gemini function declarations
+```
+
+Each target generates idiomatic output for its platform -- Claude `tool_use` blocks, OpenAI `functions` arrays, CrewAI agent/task YAML, Cursor rules with MCP configuration, or Gemini function declarations. The permission model, types, and compliance posture carry through to every target.
+
+## Agent Cards -- A2A Discovery
+
+Generate Agent Card JSON for agent-to-agent (A2A) discovery and interoperability:
+
+```bash
+pact build app.pact --agent-cards
+```
+
+Each agent in your program produces a structured JSON card describing its capabilities:
+
+```json
+{
+  "version": "1.0",
+  "agent": {
+    "name": "researcher",
+    "description": "A thorough research assistant.",
+    "model": "claude-sonnet-4-20250514",
+    "capabilities": {
+      "permissions": ["net.read", "llm.query"],
+      "tools": [
+        { "name": "web_search", "description": "Search the web for a query.", "parameters": { "query": "string" } }
+      ],
+      "skills": []
+    },
+    "compliance": {}
+  },
+  "flows": [
+    { "name": "research", "params": [{"name": "topic", "type": "String"}], "return_type": "String" }
+  ],
+  "metadata": { "generated_by": "pact-build", "source": "app.pact" }
+}
+```
+
+Agent cards enable automated discovery in multi-agent systems -- other agents and orchestrators can query what an agent can do, what permissions it holds, and what compliance posture it maintains.
+
+## MCP Server
+
+PACT includes a built-in Model Context Protocol (MCP) server, allowing AI agents and tools to interact with PACT programs over both stdio and SSE transports:
+
+```bash
+# Start MCP server (stdio transport, for editor integrations)
+pact-mcp --stdio
+
+# Start MCP server (SSE transport, for networked agents)
+pact-mcp --sse --port 3000
+```
+
+The MCP server exposes PACT's type checking, build, and documentation capabilities as MCP tools, enabling any MCP-compatible client to work with `.pact` files programmatically.
+
 ## Examples
 
 | File | Description |
@@ -256,17 +359,17 @@ Write 10 lines of PACT. Get production-grade guardrails for free.
   │  Parser  │   Recursive descent with error recovery
   └────┬────┘
   ┌────▼────┐
-  │ Checker  │   Types, permissions, template/directive validation
+  │ Checker  │   Types, permissions, compliance, template/directive validation
   └────┬────┘
   ┌────▼────┐
-  │  Build   │   TOML configs, Markdown prompts, Claude JSON schemas
+  │  Build   │   Multi-target: Claude / OpenAI / CrewAI / Cursor / Gemini
   └────┬────┘
   ┌────▼────┐
   │Dispatch  │   Tool execution, retry, compliance mediation
   └─────────┘
 ```
 
-The checker runs two passes: name collection, then validation. Permission violations, type mismatches, and undefined references are all caught before execution. The dispatcher supports mock mode for development and real API dispatch for Claude, OpenAI, and Ollama.
+The checker runs two passes: name collection, then validation. Permission violations, type mismatches, compliance role conflicts, and undefined references are all caught before execution. The dispatcher supports mock mode for development and real API dispatch for Claude, OpenAI, and Ollama.
 
 ## Editor Support
 
@@ -292,14 +395,15 @@ Configure the LSP path in settings if needed:
 |---------|-------------|
 | `pact init [file]` | Scaffold a new `.pact` project file |
 | `pact check <file>` | Type-check and validate permissions |
-| `pact build <file> [--out-dir dir]` | Compile to TOML, Markdown, and Claude JSON |
+| `pact build <file> [--target T]` | Compile to target format (claude, openai, crewai, cursor, gemini) |
+| `pact build <file> --agent-cards` | Generate Agent Card JSON for A2A discovery |
 | `pact run <file> --flow <name>` | Execute a flow (add `--dispatch claude` for real API) |
 | `pact test <file>` | Run all `test` declarations |
 | `pact fmt <file> [--write]` | Format a `.pact` file |
 | `pact doc <file> [-o file]` | Generate Markdown documentation |
 | `pact playground [--load file]` | Interactive REPL |
 | `pact list [skills\|prompts\|all]` | List built-in skills and templates |
-| `pact to-mermaid <file>` | Export flow as a Mermaid diagram |
+| `pact to-mermaid <file>` | Export flow as an agentflow Mermaid diagram |
 | `pact from-mermaid <file>` | Import a Mermaid diagram as PACT |
 
 ## Built-in Providers
@@ -317,18 +421,26 @@ Configure the LSP path in settings if needed:
 | `^time.now` | `^time.read` | Current timestamp |
 | `^json.parse` | `^json.parse` | Parse and validate JSON |
 
+## Suggested Repository Topics
+
+For GitHub discoverability, add these topics to the repository:
+
+`pact-lang` `ai-agents` `agent-orchestration` `llm-tool-calling` `multi-agent-systems` `agent-permissions` `compliance-framework` `openai-agents` `crewai` `cursor-rules` `gemini` `claude` `mcp-server` `agent-to-agent` `a2a-protocol` `type-safe` `programming-language` `rust`
+
 ## Roadmap
 
 - [x] Core language -- lexer, parser, checker, interpreter
-- [x] Build system -- TOML, Markdown, Claude JSON compilation
+- [x] Build system -- multi-target compilation (Claude, OpenAI, CrewAI, Cursor, Gemini)
 - [x] Real dispatch -- Claude API with tool-use conversation loop
 - [x] Runtime mediation -- compliance validation on every tool call
 - [x] Developer tooling -- formatter, doc generator, playground, LSP
+- [x] Compliance declarations -- risk tiers, audit levels, SOD roles, regulatory frameworks
+- [x] Agent cards -- A2A discovery JSON
+- [x] MCP server -- stdio and SSE transports
 - [ ] Package registry -- share and reuse templates, directives, tools
 - [ ] Streaming responses -- real-time agent output
-- [ ] WASM compilation -- run PACT in the browser
+- [ ] WASM module -- run PACT in the browser and embed in other tools
 - [ ] Visual editor -- drag-and-drop flow builder
-- [ ] MCP integration -- Model Context Protocol support
 
 ## License
 

@@ -109,6 +109,7 @@ impl<'t> Parser<'t> {
                 | TokenKind::Directive
                 | TokenKind::Import
                 | TokenKind::Run
+                | TokenKind::Compliance
                 | TokenKind::Eof => break,
                 _ => {
                     self.advance();
@@ -722,6 +723,101 @@ mod tests {
                 assert_eq!(l.severity.as_deref(), Some("warning"));
             }
             _ => panic!("expected Lesson"),
+        }
+    }
+
+    #[test]
+    fn parse_compliance_basic() {
+        let src = r#"compliance "payment_processing" {
+            risk: high
+            frameworks: [pci_dss, gdpr, sox]
+            audit: full
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Compliance(c) => {
+                assert_eq!(c.name, "payment_processing");
+                assert_eq!(c.risk.as_deref(), Some("high"));
+                assert_eq!(c.frameworks, vec!["pci_dss", "gdpr", "sox"]);
+                assert_eq!(c.audit.as_deref(), Some("full"));
+            }
+            _ => panic!("expected Compliance"),
+        }
+    }
+
+    #[test]
+    fn parse_compliance_with_roles() {
+        let src = r#"compliance "finance_ops" {
+            risk: critical
+            frameworks: [sox]
+            audit: full
+            retention: "7y"
+            review_interval: "90d"
+            roles {
+                approver: "finance_lead"
+                executor: "payment_agent"
+                auditor: "compliance_team"
+            }
+        }"#;
+        let prog = parse(src);
+        match &prog.decls[0].kind {
+            DeclKind::Compliance(c) => {
+                assert_eq!(c.name, "finance_ops");
+                assert_eq!(c.risk.as_deref(), Some("critical"));
+                assert_eq!(c.retention.as_deref(), Some("7y"));
+                assert_eq!(c.review_interval.as_deref(), Some("90d"));
+                assert_eq!(c.roles.len(), 3);
+                assert_eq!(c.roles[0].role, "approver");
+                assert_eq!(c.roles[0].assignee, "finance_lead");
+                assert_eq!(c.roles[1].role, "executor");
+                assert_eq!(c.roles[1].assignee, "payment_agent");
+                assert_eq!(c.roles[2].role, "auditor");
+                assert_eq!(c.roles[2].assignee, "compliance_team");
+            }
+            _ => panic!("expected Compliance"),
+        }
+    }
+
+    #[test]
+    fn parse_compliance_minimal() {
+        let src = r#"compliance "empty_profile" {
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 1);
+        match &prog.decls[0].kind {
+            DeclKind::Compliance(c) => {
+                assert_eq!(c.name, "empty_profile");
+                assert!(c.risk.is_none());
+                assert!(c.frameworks.is_empty());
+                assert!(c.audit.is_none());
+                assert!(c.retention.is_none());
+                assert!(c.review_interval.is_none());
+                assert!(c.roles.is_empty());
+            }
+            _ => panic!("expected Compliance"),
+        }
+    }
+
+    #[test]
+    fn parse_agent_with_compliance() {
+        let src = r#"compliance "pci" {
+            risk: high
+            audit: full
+        }
+        agent @processor {
+            permits: [^llm.query]
+            tools: [#greet]
+            compliance: "pci"
+        }"#;
+        let prog = parse(src);
+        assert_eq!(prog.decls.len(), 2);
+        match &prog.decls[1].kind {
+            DeclKind::Agent(a) => {
+                assert_eq!(a.name, "processor");
+                assert_eq!(a.compliance.as_deref(), Some("pci"));
+            }
+            _ => panic!("expected Agent"),
         }
     }
 }
