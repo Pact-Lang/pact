@@ -193,6 +193,62 @@ pub enum CheckError {
         #[label("declared here")]
         span: miette::SourceSpan,
     },
+
+    /// A compliance profile has an invalid risk tier.
+    #[error("invalid compliance risk tier '{value}' for profile '{name}'")]
+    #[diagnostic(help("risk must be one of: low, medium, high, critical"))]
+    InvalidComplianceRisk {
+        /// The compliance profile name.
+        name: String,
+        /// The invalid risk value.
+        value: String,
+        /// Location of the risk value.
+        #[label("invalid risk here")]
+        span: miette::SourceSpan,
+    },
+
+    /// A compliance profile has an invalid audit level.
+    #[error("invalid compliance audit level '{value}' for profile '{name}'")]
+    #[diagnostic(help("audit must be one of: none, summary, full"))]
+    InvalidComplianceAudit {
+        /// The compliance profile name.
+        name: String,
+        /// The invalid audit value.
+        value: String,
+        /// Location of the audit value.
+        #[label("invalid audit here")]
+        span: miette::SourceSpan,
+    },
+
+    /// An agent references a compliance profile that was never declared.
+    #[error("unknown compliance profile '{name}'")]
+    #[diagnostic(help("define a compliance profile with `compliance \"{name}\" {{ ... }}`"))]
+    UnknownCompliance {
+        /// The unresolved compliance profile name.
+        name: String,
+        /// Location of the reference.
+        #[label("referenced here")]
+        span: miette::SourceSpan,
+    },
+
+    /// A compliance profile has conflicting separation-of-duty roles.
+    #[error("compliance profile '{name}': agent '{agent}' holds conflicting roles ({role_a} and {role_b})")]
+    #[diagnostic(help(
+        "separation of duties requires that no agent holds both approver and executor roles"
+    ))]
+    ComplianceSodConflict {
+        /// The compliance profile name.
+        name: String,
+        /// The agent holding conflicting roles.
+        agent: String,
+        /// One of the conflicting roles.
+        role_a: String,
+        /// The other conflicting role.
+        role_b: String,
+        /// Location of the compliance declaration.
+        #[label("declared here")]
+        span: miette::SourceSpan,
+    },
 }
 
 /// The semantic checker for PACT programs.
@@ -473,6 +529,59 @@ impl Checker {
                         });
                     }
                 }
+                DeclKind::Compliance(c) => {
+                    // Validate risk tier
+                    if let Some(ref risk) = c.risk {
+                        if !matches!(risk.as_str(), "low" | "medium" | "high" | "critical") {
+                            self.errors.push(CheckError::InvalidComplianceRisk {
+                                name: c.name.clone(),
+                                value: risk.clone(),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
+                        }
+                    }
+                    // Validate audit level
+                    if let Some(ref audit) = c.audit {
+                        if !matches!(audit.as_str(), "none" | "summary" | "full") {
+                            self.errors.push(CheckError::InvalidComplianceAudit {
+                                name: c.name.clone(),
+                                value: audit.clone(),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
+                        }
+                    }
+                    // SOD: no agent should hold both approver and executor
+                    let mut role_map: std::collections::HashMap<&str, Vec<&str>> =
+                        std::collections::HashMap::new();
+                    for role in &c.roles {
+                        role_map.entry(&role.assignee).or_default().push(&role.role);
+                    }
+                    for (assignee, roles) in &role_map {
+                        let has_approver = roles.contains(&"approver");
+                        let has_executor = roles.contains(&"executor");
+                        if has_approver && has_executor {
+                            self.errors.push(CheckError::ComplianceSodConflict {
+                                name: c.name.clone(),
+                                agent: assignee.to_string(),
+                                role_a: "approver".to_string(),
+                                role_b: "executor".to_string(),
+                                span: (decl.span.start..decl.span.end).into(),
+                            });
+                        }
+                    }
+                    if !self.symbols.define(
+                        c.name.clone(),
+                        SymbolKind::Compliance {
+                            risk: c.risk.clone(),
+                            audit: c.audit.clone(),
+                        },
+                    ) {
+                        self.errors.push(CheckError::DuplicateDefinition {
+                            name: c.name.clone(),
+                            span: (decl.span.start..decl.span.end).into(),
+                        });
+                    }
+                }
                 DeclKind::Test(_) => {
                     // Tests don't define symbols
                 }
@@ -523,6 +632,19 @@ impl Checker {
                                 tool_expr.span.end,
                                 &fallback_registry,
                             );
+                        }
+                    }
+
+                    // Validate compliance profile reference
+                    if let Some(ref compliance_name) = a.compliance {
+                        match self.symbols.lookup(compliance_name) {
+                            Some(SymbolKind::Compliance { .. }) => {} // OK
+                            _ => {
+                                self.errors.push(CheckError::UnknownCompliance {
+                                    name: compliance_name.clone(),
+                                    span: (decl.span.start..decl.span.end).into(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1244,5 +1366,108 @@ mod tests {
         "#;
         let errors = check_src(src);
         assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    // ── Compliance tests ──────────────────────────────────────────
+
+    #[test]
+    fn checker_valid_compliance() {
+        let src = r#"
+            compliance "payment_processing" {
+                risk: high
+                frameworks: [pci_dss, gdpr]
+                audit: full
+                retention: "7y"
+                review_interval: "90d"
+                roles {
+                    approver: "finance_lead"
+                    executor: "payment_agent"
+                    auditor: "compliance_team"
+                }
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(errors.is_empty(), "expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn checker_invalid_compliance_risk() {
+        let src = r#"
+            compliance "bad_risk" {
+                risk: extreme
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1, "expected 1 error, got: {:?}", errors);
+        assert!(
+            matches!(&errors[0], CheckError::InvalidComplianceRisk { name, value, .. }
+                if name == "bad_risk" && value == "extreme"
+            ),
+            "expected InvalidComplianceRisk, got: {:?}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn checker_invalid_compliance_audit() {
+        let src = r#"
+            compliance "bad_audit" {
+                audit: verbose
+            }
+        "#;
+        let errors = check_src(src);
+        assert_eq!(errors.len(), 1, "expected 1 error, got: {:?}", errors);
+        assert!(
+            matches!(&errors[0], CheckError::InvalidComplianceAudit { name, value, .. }
+                if name == "bad_audit" && value == "verbose"
+            ),
+            "expected InvalidComplianceAudit, got: {:?}",
+            errors[0]
+        );
+    }
+
+    #[test]
+    fn checker_unknown_compliance_ref() {
+        let src = r#"
+            agent @processor {
+                permits: [^llm.query]
+                tools: [#greet]
+                compliance: "nonexistent_profile"
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckError::UnknownCompliance { name, .. }
+                if name == "nonexistent_profile"
+            )),
+            "expected UnknownCompliance error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn checker_compliance_sod_conflict() {
+        let src = r#"
+            compliance "conflicting_roles" {
+                risk: high
+                audit: full
+                roles {
+                    approver: "same_agent"
+                    executor: "same_agent"
+                }
+            }
+        "#;
+        let errors = check_src(src);
+        assert!(
+            errors.iter().any(|e| matches!(
+                e,
+                CheckError::ComplianceSodConflict { name, agent, .. }
+                if name == "conflicting_roles" && agent == "same_agent"
+            )),
+            "expected ComplianceSodConflict error, got: {:?}",
+            errors
+        );
     }
 }

@@ -238,21 +238,25 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
                 let test_id = format!("test_{}", graph.tests.len() + 1);
 
                 // Extract dispatch/flow targets from test body for linking.
+                let mut seen_targets = std::collections::HashSet::new();
                 for expr in &t.body {
                     for target in extract_test_targets(expr) {
-                        graph.edges.push(AgentFlowEdge {
-                            from: test_id.clone(),
-                            to: target,
-                            label: None,
-                            edge_type: EdgeType::Reference,
-                            stroke: EdgeStroke::Dotted,
-                        });
+                        if seen_targets.insert(target.clone()) {
+                            graph.edges.push(AgentFlowEdge {
+                                from: test_id.clone(),
+                                to: target,
+                                label: None,
+                                edge_type: EdgeType::Reference,
+                                stroke: EdgeStroke::Dotted,
+                            });
+                        }
                     }
                 }
 
+                let test_num = graph.tests.len() + 1;
                 graph.tests.push(AgentFlowTestCase {
                     id: test_id,
-                    label: t.description.clone(),
+                    label: format!("Test {test_num}"),
                     assertions: vec![],
                     metadata: TestMetadata {
                         assert_expr: Some(t.description.clone()),
@@ -263,6 +267,7 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
             DeclKind::PermitTree(pt) => {
                 emit_permit_tree_edges(&mut graph.edges, &pt.nodes, None);
             }
+            DeclKind::Compliance(_) => {} // Compliance metadata — not emitted in agentflow
             _ => {}
         }
     }
@@ -928,6 +933,10 @@ fn emit_flow_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlowGrap
         out.push_str("      end\n\n");
 
         // Collect deferred metadata (emitted outside flow container).
+        deferred_meta.push(format!(
+            "{agent_id}@{{ shape: tag-rect, type: \"{}\" }}",
+            step.agent
+        ));
         deferred_meta.push(format!("{tool_id}@{{ shape: subroutine }}"));
         deferred_meta.push(format!("{out_id}@{{ shape: doc }}"));
     }
@@ -1031,7 +1040,7 @@ fn emit_pipeline_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlow
         } else {
             let agent_ref = format!("s{}", i + 1);
             out.push_str(&format!(
-                "        {}[\"@{}\"]@{{ shape: hex, agent: {} }} --- {}@{{ shape: subroutine }}\n",
+                "        {}[\"{}\"]@{{ shape: tag-rect, type: \"{}\" }} --- {}@{{ shape: subroutine }}\n",
                 agent_ref, step.agent, step.agent, step.tool
             ));
             out.push_str(&format!(
@@ -1306,21 +1315,36 @@ fn extract_test_targets(expr: &pact_core::ast::expr::Expr) -> Vec<String> {
     targets
 }
 
-/// Emit a directive as a trapezoid-shaped node with metadata.
+/// Emit a directive as a container or trapezoid node depending on whether it has params.
 fn emit_directive_node(out: &mut String, dir: &AgentFlowDirectiveNode) {
-    out.push_str(&format!("\n{}[\"{}\"]\n", dir.id, to_title_case(&dir.id)));
+    if dir.metadata.params.is_empty() {
+        // Simple directive — trapezoid node.
+        out.push_str(&format!("\n{}[\"{}\"]\n", dir.id, to_title_case(&dir.id)));
+        out.push_str(&format!("{}@{{ shape: trapezoid }}\n", dir.id));
+    } else {
+        // Directive with params — use container.
+        out.push_str(&format!(
+            "\ndirective {}[\"{}\"]\n",
+            dir.id,
+            to_title_case(&dir.id)
+        ));
+        for (k, v) in &dir.metadata.params {
+            out.push_str(&format!("  {}[\"{}: {}\"]\n", k, k, v));
+        }
+        out.push_str("end\n");
 
-    let mut meta_parts = vec!["shape: trapezoid".to_string()];
-    if !dir.metadata.params.is_empty() {
         let params_csv: Vec<String> = dir
             .metadata
             .params
             .iter()
             .map(|(k, v)| format!("{} :: {}", k, v))
             .collect();
-        meta_parts.push(format!("params: \"{}\"", params_csv.join(", ")));
+        out.push_str(&format!(
+            "{}@{{ params: \"{}\" }}\n",
+            dir.id,
+            params_csv.join(", ")
+        ));
     }
-    out.push_str(&format!("{}@{{ {} }}\n", dir.id, meta_parts.join(", ")));
 }
 
 /// Emit a lesson as a lin-doc node with metadata.

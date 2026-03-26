@@ -92,6 +92,12 @@ pub fn generate_claude_md(program: &Program, config: &BuildConfig) -> String {
         md.push_str(&lessons_section);
     }
 
+    // Compliance section
+    let compliance_section = generate_compliance_section(program);
+    if !compliance_section.is_empty() {
+        md.push_str(&compliance_section);
+    }
+
     // Task Management section (only if there are flows)
     let has_flows = program
         .decls
@@ -357,6 +363,54 @@ fn generate_lessons_section(program: &Program) -> String {
         }
     }
     md.push('\n');
+
+    md
+}
+
+/// Generate the Compliance section.
+fn generate_compliance_section(program: &Program) -> String {
+    let compliances: Vec<_> = program
+        .decls
+        .iter()
+        .filter_map(|d| match &d.kind {
+            DeclKind::Compliance(c) => Some(c),
+            _ => None,
+        })
+        .collect();
+
+    if compliances.is_empty() {
+        return String::new();
+    }
+
+    let mut md = String::from("## Compliance\n\n");
+
+    for c in compliances {
+        md.push_str(&format!("### {}\n", c.name));
+
+        if let Some(risk) = &c.risk {
+            md.push_str(&format!("**Risk:** {}\n", risk));
+        }
+        if !c.frameworks.is_empty() {
+            md.push_str(&format!("**Frameworks:** {}\n", c.frameworks.join(", ")));
+        }
+        if let Some(audit) = &c.audit {
+            md.push_str(&format!("**Audit:** {}\n", audit));
+        }
+        if let Some(retention) = &c.retention {
+            md.push_str(&format!("**Retention:** {}\n", retention));
+        }
+        if let Some(interval) = &c.review_interval {
+            md.push_str(&format!("**Review Interval:** {}\n", interval));
+        }
+        if !c.roles.is_empty() {
+            md.push_str("**Roles:**\n");
+            for role in &c.roles {
+                md.push_str(&format!("- {}: {}\n", role.role, role.assignee));
+            }
+        }
+
+        md.push('\n');
+    }
 
     md
 }

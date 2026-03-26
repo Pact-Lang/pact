@@ -1,0 +1,263 @@
+agentflow TB
+  type Patient = Record {
+    age: Int
+    allergies: List<String>
+    chief_complaint: String
+    current_medications: List<String>
+    id: String
+    medical_history: List<String>
+    sex: String
+    vitals: String
+  }
+
+  type TriageAssessment = Record {
+    acuity: String
+    differential: List<String>
+    disposition: String
+    primary_impression: String
+    recommended_workup: List<String>
+  }
+
+  type TreatmentPlan = Record {
+    diagnosis: String
+    follow_up: String
+    interventions: List<String>
+    medications: List<String>
+    red_flags: List<String>
+  }
+
+  type AcuityLevel = Resuscitation | Emergent | Urgent | LessUrgent | NonUrgent
+  type Disposition = Admit | Observe | Discharge | Transfer | AMA
+  type LabPriority = STAT | Urgent | Routine
+
+
+agent ed_team["Ed Team"]
+
+    agent triage_nurse["Triage Nurse"]
+        assess_vitals
+    end
+    triage_nurse@{
+        model: "claude-sonnet-4-20250514"
+        permits: "llm.query"
+        prompt: "You are an experienced emergency triage nurse with 20 years of experience. You assess patients rapidly and accurately using the Emergency Severity Index. You have an instinct for identifying sick patients who look well and well patients who look sick. Your acuity assignments are consistently accurate. You never downgrade acuity under pressure. IMPORTANT: You provide decision support only — a physician must confirm all assessments."
+    }
+
+    agent diagnostician["Diagnostician"]
+        generate_differential
+        recommend_workup
+        search_clinical_literature
+        skill rapid_assessment["Rapid Assessment"]
+            #assess_vitals
+            #generate_differential
+        end
+        rapid_assessment@{
+          strategy: "Assess vitals first to determine acuity — if ESI 1 or 2, immediately generate differential with urgency flag"
+          params: "patient_data :: String"
+          returns: "String"
+        }
+    end
+    diagnostician@{
+        model: "claude-sonnet-4-20250514"
+        permits: "llm.query, net.read, llm.embed"
+        prompt: "You are a board-certified emergency physician and diagnostician. You think in probabilistic differentials, not single diagnoses. You always include must-not-miss diagnoses (PE, MI, aortic dissection, ectopic pregnancy, meningitis) even when unlikely. You order tests strategically — each test should change management. You stay current with evidence-based guidelines. IMPORTANT: This is decision support — clinical judgment always supersedes."
+        memory: "case_archive, guideline_updates"
+    }
+
+    agent attending["Attending"]
+        suggest_treatment
+    end
+    attending@{
+        model: "claude-sonnet-4-20250514"
+        permits: "llm.query"
+        prompt: "You are a senior attending physician. You create treatment plans that are safe, evidence-based, and practical. You always check drug interactions and allergies before recommending medications. You include clear discharge instructions and return precautions. You think about the whole patient — not just the chief complaint. IMPORTANT: All treatment recommendations require physician review before implementation."
+    }
+
+    agent records_agent["Records Agent"]
+        save_encounter
+    end
+    records_agent@{
+        permits: "db.write"
+        prompt: "You are a clinical documentation agent. You save encounter records to the EHR. Execute writes precisely and confirm completion. Never fabricate confirmations."
+    }
+    triage_nurse --x diagnostician
+    diagnostician --x attending
+    attending --x records_agent
+  end
+  ed_team@{
+    view: collapsed
+    fallbacks: "triage_nurse ?> diagnostician ?> attending ?> records_agent"
+  }
+
+directive clinical_reasoning["Clinical Reasoning"]
+  decision_tool["decision_tool: String = Ottawa Ankle Rules, HEART Score, Wells Criteria"]
+end
+clinical_reasoning@{ params: "decision_tool :: String = Ottawa Ankle Rules, HEART Score, Wells Criteria" }
+
+directive patient_safety["Patient Safety"]
+  high_risk_meds["high_risk_meds: String = anticoagulants, opioids, insulin, chemotherapy"]
+  pediatric_age["pediatric_age: String = 18"]
+end
+patient_safety@{ params: "high_risk_meds :: String = anticoagulants, opioids, insulin, chemotherapy, pediatric_age :: String = 18" }
+
+anchoring_bias["Anchoring Bias"]
+anchoring_bias@{ shape: lin-doc, severity: "error", context: "System anchored on initial diagnosis of musculoskeletal pain, missed subtle PE presentation", rule: "Always generate at least 5 differentials including one life-threatening diagnosis regardless of initial presentation — anchoring bias is the most dangerous diagnostic error" }
+medication_allergy_cross_reactivity["Medication Allergy Cross Reactivity"]
+medication_allergy_cross_reactivity@{ shape: lin-doc, severity: "error", context: "Patient with documented penicillin allergy received cephalosporin without cross-reactivity check", rule: "When patient has beta-lactam allergy, always assess cross-reactivity risk before recommending cephalosporins — 1-2% cross-reactivity rate is clinically significant" }
+vital_sign_trends["Vital Sign Trends"]
+vital_sign_trends@{ shape: lin-doc, severity: "warning", context: "Single normal vital sign reading masked a patient who was trending toward sepsis", rule: "Always request vital sign trends (at least 2 readings 15 min apart) for patients with infection concerns — single readings can be misleading" }
+
+llm -->> llm_query
+llm -->> llm_embed
+db -->> db_read
+db -->> db_write
+net -->> net_read
+
+
+flow triage_patient["Triage Patient"]
+      direction TB
+      task triage_patient_step1["Step 1"]
+        triage_patient_agent_s1["triage_nurse"] --- triage_patient_assess_vitals_s1["assess_vitals"] --> triage_patient_acuity_s1["acuity"]
+      end
+
+      task triage_patient_step2["Step 2"]
+        triage_patient_agent_s2["diagnostician"] --- triage_patient_generate_differential_s2["generate_differential"] --> triage_patient_differential_s2["differential"]
+      end
+
+      task triage_patient_step3["Step 3"]
+        triage_patient_agent_s3["diagnostician"] --- triage_patient_search_clinical_literature_s3["search_clinical_literature"] --> triage_patient_literature_s3["literature"]
+      end
+
+      task triage_patient_step4["Step 4"]
+        triage_patient_agent_s4["diagnostician"] --- triage_patient_recommend_workup_s4["recommend_workup"] --> triage_patient_workup_s4["workup"]
+      end
+
+      task triage_patient_step5["Step 5"]
+        triage_patient_agent_s5["attending"] --- triage_patient_suggest_treatment_s5["suggest_treatment"] --> triage_patient_treatment_s5["treatment"]
+      end
+
+    triage_patient_step1 -->|"acuity"| triage_patient_step2
+    triage_patient_step2 -->|"differential"| triage_patient_step3
+    triage_patient_step3 -->|"literature"| triage_patient_step4
+    triage_patient_step4 -->|"workup"| triage_patient_step5
+    triage_patient_step3 -->|"differential"| triage_patient_step4
+    triage_patient_step4 -->|"differential"| triage_patient_step5
+end
+  triage_patient@{
+    params: "age: Int, chief_complaint: String, history: String, vitals: String"
+    returns: "String"
+  }
+triage_patient_agent_s1@{ shape: tag-rect, type: "triage_nurse" }
+triage_patient_assess_vitals_s1@{ shape: subroutine }
+triage_patient_acuity_s1@{ shape: doc }
+triage_patient_agent_s2@{ shape: tag-rect, type: "diagnostician" }
+triage_patient_generate_differential_s2@{ shape: subroutine }
+triage_patient_differential_s2@{ shape: doc }
+triage_patient_agent_s3@{ shape: tag-rect, type: "diagnostician" }
+triage_patient_search_clinical_literature_s3@{ shape: subroutine }
+triage_patient_literature_s3@{ shape: doc }
+triage_patient_agent_s4@{ shape: tag-rect, type: "diagnostician" }
+triage_patient_recommend_workup_s4@{ shape: subroutine }
+triage_patient_workup_s4@{ shape: doc }
+triage_patient_agent_s5@{ shape: tag-rect, type: "attending" }
+triage_patient_suggest_treatment_s5@{ shape: subroutine }
+triage_patient_treatment_s5@{ shape: doc }
+
+flow route_by_acuity["Route By Acuity"]
+      direction TB
+      task route_by_acuity_step1["Step 1"]
+        route_by_acuity_agent_s1["triage_nurse"] --- route_by_acuity_assess_vitals_s1["assess_vitals"] --> route_by_acuity_acuity_s1["acuity"]
+      end
+
+end
+  route_by_acuity@{
+    params: "age: Int, chief_complaint: String, vitals: String"
+    returns: "String"
+  }
+route_by_acuity_agent_s1@{ shape: tag-rect, type: "triage_nurse" }
+route_by_acuity_assess_vitals_s1@{ shape: subroutine }
+route_by_acuity_acuity_s1@{ shape: doc }
+
+flow quick_assess["Quick Assess"]
+      direction TB
+      task quick_assess_step1["Step 1"]
+        quick_assess_agent_s1["diagnostician"] --- quick_assess_generate_differential_s1["generate_differential"] --> quick_assess_result_s1["result"]
+      end
+
+end
+  quick_assess@{
+    params: "complaint: String, vitals: String"
+    returns: "String"
+  }
+quick_assess_agent_s1@{ shape: tag-rect, type: "diagnostician" }
+quick_assess_generate_differential_s1@{ shape: subroutine }
+quick_assess_result_s1@{ shape: doc }
+
+template triage_note {
+    section PRESENTATION
+    CHIEF_COMPLAINT: String           <<presenting complaint in patient's words>>
+    VITALS: String           <<HR | BP | RR | SpO2 | Temp | Pain>>
+    HPI: String           <<history of present illness narrative>>
+    section ASSESSMENT
+    ACUITY: String           <<ESI level with justification>>
+    PRIMARY_IMPRESSION: String           <<most likely diagnosis>>
+    DIFFERENTIAL: String * 5           <<Diagnosis | Likelihood | Key distinguishing feature>>
+    section PLAN
+    WORKUP: String * 4           <<Test | Priority | Rationale>>
+    DISPOSITION: String           <<recommended patient disposition>>
+  }
+
+template clinical_guideline {
+    section DIAGNOSIS
+    CRITERIA: String * 3           <<Criterion | Met/Unmet | Evidence>>
+    SCORING: String           <<clinical decision rule score and interpretation>>
+    section MANAGEMENT
+    INTERVENTION: String * 4           <<Priority | Intervention | Timing | Monitoring>>
+    MEDICATION: String * 3           <<Drug | Dose | Route | Frequency | Duration>>
+    section SAFETY
+    RED_FLAG: String * 3           <<Warning sign | Action required | Urgency>>
+    CONTRAINDICATION: String * 2           <<Medication/Procedure | Reason>>
+  }
+
+testCase test_1["vitals assessment assigns ESI level"]
+  test_1_assertion["assert"]
+end
+test_1_assertion@{ shape: double-circle }
+test_1@{
+    assert: "vitals assessment assigns ESI level"
+}
+
+testCase test_2["differential includes must-not-miss diagnoses"]
+  test_2_assertion["assert"]
+end
+test_2_assertion@{ shape: double-circle }
+test_2@{
+    assert: "differential includes must-not-miss diagnoses"
+}
+
+testCase test_3["treatment checks allergies"]
+  test_3_assertion["assert"]
+end
+test_3_assertion@{ shape: double-circle }
+test_3@{
+    assert: "treatment checks allergies"
+}
+
+testCase test_4["full triage pipeline completes"]
+  test_4_assertion["assert"]
+end
+test_4_assertion@{ shape: double-circle }
+test_4@{
+    assert: "full triage pipeline completes"
+}
+
+test_1 -.-> triage_nurse
+test_2 -.-> diagnostician
+test_3 -.-> attending
+test_4 -.-> triage_patient
+
+ed_team ~~~ clinical_reasoning
+clinical_reasoning ~~~ anchoring_bias
+triage_patient ~~~ test_1
+test_1 ~~~ llm
+ed_team ~~~ triage_patient
+

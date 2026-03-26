@@ -91,6 +91,28 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["source"]
             }),
         },
+        ToolDef {
+            name: "pact_to_mermaid",
+            description: "Convert a .pact source string to a Mermaid agentflow diagram. Returns the agentflow text.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "The .pact source code to convert" }
+                },
+                "required": ["source"]
+            }),
+        },
+        ToolDef {
+            name: "pact_from_mermaid",
+            description: "Convert a Mermaid agentflow diagram to .pact source code. Returns valid PACT source.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source": { "type": "string", "description": "The Mermaid agentflow diagram text to convert" }
+                },
+                "required": ["source"]
+            }),
+        },
     ]
 }
 
@@ -101,6 +123,8 @@ pub fn handle_tool_call(name: &str, args: &Value) -> Result<String, String> {
         "pact_run" => handle_run(args),
         "pact_scaffold" => handle_scaffold(args),
         "pact_validate_permissions" => handle_validate_permissions(args),
+        "pact_to_mermaid" => handle_to_mermaid(args),
+        "pact_from_mermaid" => handle_from_mermaid(args),
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -268,6 +292,10 @@ fn handle_list(args: &Value) -> Result<String, String> {
             DeclKind::Lesson(l) => {
                 let sev = l.severity.as_deref().unwrap_or("info");
                 lines.push(format!("lesson \"{}\" ({})", l.name, sev));
+            }
+            DeclKind::Compliance(c) => {
+                let risk = c.risk.as_deref().unwrap_or("unspecified");
+                lines.push(format!("compliance \"{}\" (risk: {})", c.name, risk));
             }
         }
     }
@@ -499,6 +527,33 @@ fn handle_validate_permissions(args: &Value) -> Result<String, String> {
     }
 }
 
+fn handle_to_mermaid(args: &Value) -> Result<String, String> {
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing required argument: source".to_string())?;
+
+    let mut sm = SourceMap::new();
+    let id = sm.add("input.pact", source);
+    let tokens = Lexer::new(source, id)
+        .lex()
+        .map_err(|e| format!("Lex error: {e}"))?;
+    let program = Parser::new(&tokens)
+        .parse()
+        .map_err(|e| format!("Parse error: {e}"))?;
+
+    Ok(pact_mermaid::agentflow_emit::pact_to_agentflow(&program))
+}
+
+fn handle_from_mermaid(args: &Value) -> Result<String, String> {
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing required argument: source".to_string())?;
+
+    pact_mermaid::diagram_to_pact(source).map_err(|e| format!("Conversion error: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -631,6 +686,78 @@ mod tests {
         assert!(
             result.contains("OK"),
             "expected OK for specific permissions, got: {result}"
+        );
+    }
+
+    #[test]
+    fn to_mermaid_converts_pact() {
+        let args = json!({
+            "source": r#"
+                agent @researcher {
+                    permits: [^llm.query]
+                    tools: [#search]
+                }
+                flow main(query :: String) -> String {
+                    result = @researcher -> #search(query)
+                    return result
+                }
+            "#
+        });
+        let result = handle_tool_call("pact_to_mermaid", &args).unwrap();
+        assert!(
+            result.contains("agentflow"),
+            "expected agentflow header, got: {result}"
+        );
+        assert!(
+            result.contains("researcher"),
+            "expected agent in output, got: {result}"
+        );
+    }
+
+    #[test]
+    fn from_mermaid_converts_agentflow() {
+        let args = json!({
+            "source": r#"agentflow TB
+agent researcher["Researcher"]
+    search
+end
+researcher@{
+    model: "claude-sonnet-4-20250514"
+    permits: "llm.query"
+}
+"#
+        });
+        let result = handle_tool_call("pact_from_mermaid", &args).unwrap();
+        assert!(
+            result.contains("agent @researcher"),
+            "expected agent declaration, got: {result}"
+        );
+    }
+
+    #[test]
+    fn roundtrip_pact_to_mermaid_to_pact() {
+        let pact_source = r#"
+            agent @writer {
+                permits: [^llm.query]
+                tools: [#draft]
+            }
+            flow write(topic :: String) -> String {
+                result = @writer -> #draft(topic)
+                return result
+            }
+        "#;
+
+        // PACT -> Mermaid
+        let to_args = json!({ "source": pact_source });
+        let mermaid = handle_tool_call("pact_to_mermaid", &to_args).unwrap();
+        assert!(mermaid.contains("agentflow"));
+
+        // Mermaid -> PACT
+        let from_args = json!({ "source": mermaid });
+        let pact_back = handle_tool_call("pact_from_mermaid", &from_args).unwrap();
+        assert!(
+            pact_back.contains("agent @writer"),
+            "roundtrip should preserve agent, got: {pact_back}"
         );
     }
 }

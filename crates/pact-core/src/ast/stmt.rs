@@ -5,7 +5,9 @@
 //! Declaration / statement AST nodes.
 //!
 //! These nodes represent the top-level constructs in a `.pact` file:
-//! agents, flows, schemas, type aliases, permission trees, and tests.
+//! agents, flows, schemas, type aliases, permission trees, tools, skills,
+//! templates, directives, tests, imports, connections, lessons, and
+//! compliance declarations.
 
 use super::expr::Expr;
 use super::types::TypeExpr;
@@ -165,6 +167,24 @@ pub enum DeclKind {
     /// }
     /// ```
     Lesson(LessonDecl),
+
+    /// A compliance declaration — regulatory and governance metadata.
+    ///
+    /// ```pact
+    /// compliance "payment_processing" {
+    ///     risk: high
+    ///     frameworks: [pci_dss, gdpr, sox]
+    ///     audit: full
+    ///     retention: "7y"
+    ///     review_interval: "90d"
+    ///     roles {
+    ///         approver: "finance_lead"
+    ///         executor: "payment_agent"
+    ///         auditor: "compliance_team"
+    ///     }
+    /// }
+    /// ```
+    Compliance(ComplianceDecl),
 }
 
 /// Directive declaration — reusable prompt block with optional parameters.
@@ -231,6 +251,36 @@ pub struct LessonDecl {
     pub severity: Option<String>,
 }
 
+/// Compliance declaration — regulatory and governance metadata.
+/// Defines risk tiers, regulatory frameworks, audit requirements, and
+/// separation-of-duty roles for regulated agent deployments.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComplianceDecl {
+    /// Compliance profile name.
+    pub name: String,
+    /// Risk tier: "low", "medium", "high", "critical".
+    pub risk: Option<String>,
+    /// Regulatory frameworks (e.g. "gdpr", "hipaa", "pci_dss", "sox", "ccpa").
+    pub frameworks: Vec<String>,
+    /// Audit level: "none", "summary", "full".
+    pub audit: Option<String>,
+    /// Data retention period (e.g. "7y", "90d", "indefinite").
+    pub retention: Option<String>,
+    /// Review interval (e.g. "90d", "1y").
+    pub review_interval: Option<String>,
+    /// Separation-of-duty role assignments.
+    pub roles: Vec<ComplianceRole>,
+}
+
+/// A role in a separation-of-duties declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComplianceRole {
+    /// Role type (e.g. "approver", "executor", "auditor", "reviewer").
+    pub role: String,
+    /// Assigned entity name (agent name or team string).
+    pub assignee: String,
+}
+
 /// Template declaration — reusable output format specification.
 /// Referenced by tools via `output: %template_name`.
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +340,8 @@ pub struct AgentDecl {
     pub prompt: Option<Expr>,
     /// Optional memory references.
     pub memory: Vec<Expr>,
+    /// Optional compliance profile reference.
+    pub compliance: Option<String>,
 }
 
 /// Agent bundle declaration fields.

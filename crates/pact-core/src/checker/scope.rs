@@ -78,6 +78,13 @@ pub enum SymbolKind {
         /// Severity level if specified.
         severity: Option<String>,
     },
+    /// A compliance declaration with risk tier and audit level.
+    Compliance {
+        /// Risk tier if specified.
+        risk: Option<String>,
+        /// Audit level if specified.
+        audit: Option<String>,
+    },
 }
 
 /// The symbol table for a PACT program.

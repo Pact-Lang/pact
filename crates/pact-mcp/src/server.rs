@@ -150,7 +150,7 @@ mod tests {
         let resp = handle_request(&req);
         let result = resp.result.unwrap();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 7);
         let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"pact_check"));
         assert!(names.contains(&"pact_list"));

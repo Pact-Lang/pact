@@ -5,7 +5,8 @@
 //! Top-level declaration parsing.
 //!
 //! Handles parsing of `agent`, `agent_bundle`, `flow`, `schema`, `type`,
-//! `permit_tree`, and `test` declarations.
+//! `permit_tree`, `tool`, `skill`, `template`, `directive`, `test`,
+//! `import`, `connect`, `lesson`, and `compliance` declarations.
 
 use super::{ParseError, Parser};
 use crate::ast::stmt::*;
@@ -129,8 +130,16 @@ impl<'t> Parser<'t> {
                     kind: DeclKind::Lesson(decl),
                 })
             }
+            TokenKind::Compliance => {
+                self.advance();
+                let decl = self.parse_compliance_decl()?;
+                Ok(Decl {
+                    span: span.merge(self.previous_span()),
+                    kind: DeclKind::Compliance(decl),
+                })
+            }
             _ => Err(ParseError::UnexpectedToken {
-                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect, lesson)"
+                expected: "declaration (agent, skill, tool, flow, schema, type, permit_tree, template, directive, test, import, connect, lesson, compliance)"
                     .to_string(),
                 found: self.peek_kind().describe().to_string(),
                 span: (span.start..span.end).into(),
@@ -150,6 +159,7 @@ impl<'t> Parser<'t> {
         let mut model = None;
         let mut prompt = None;
         let mut memory = Vec::new();
+        let mut compliance = None;
 
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             match self.peek_kind().clone() {
@@ -194,10 +204,28 @@ impl<'t> Parser<'t> {
                         self.parse_comma_separated(|p| p.parse_expr(), &TokenKind::RBracket)?;
                     self.expect(&TokenKind::RBracket)?;
                 }
+                TokenKind::Compliance => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    match self.peek_kind().clone() {
+                        TokenKind::StringLit(s) => {
+                            compliance = Some(s.clone());
+                            self.advance();
+                        }
+                        _ => {
+                            let span = self.current_span();
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "compliance profile name string".to_string(),
+                                found: self.peek_kind().describe().to_string(),
+                                span: (span.start..span.end).into(),
+                            });
+                        }
+                    }
+                }
                 _ => {
                     let span = self.current_span();
                     return Err(ParseError::UnexpectedToken {
-                        expected: "agent field (permits, tools, skills, model, prompt, memory)"
+                        expected: "agent field (permits, tools, skills, model, prompt, memory, compliance)"
                             .to_string(),
                         found: self.peek_kind().describe().to_string(),
                         span: (span.start..span.end).into(),
@@ -216,6 +244,7 @@ impl<'t> Parser<'t> {
             model,
             prompt,
             memory,
+            compliance,
         })
     }
 
@@ -950,6 +979,143 @@ impl<'t> Parser<'t> {
             context,
             rule,
             severity,
+        })
+    }
+
+    /// Parse `compliance "name" { risk: ident frameworks: [...] audit: ident retention: "..." review_interval: "..." roles { role: "assignee" } }`.
+    fn parse_compliance_decl(&mut self) -> Result<ComplianceDecl, ParseError> {
+        let name = match self.peek_kind().clone() {
+            TokenKind::StringLit(s) => {
+                let s = s.clone();
+                self.advance();
+                s
+            }
+            _ => {
+                let span = self.current_span();
+                return Err(ParseError::UnexpectedToken {
+                    expected: "compliance profile name string".to_string(),
+                    found: self.peek_kind().describe().to_string(),
+                    span: (span.start..span.end).into(),
+                });
+            }
+        };
+
+        self.expect(&TokenKind::LBrace)?;
+
+        let mut risk = None;
+        let mut frameworks = Vec::new();
+        let mut audit = None;
+        let mut retention = None;
+        let mut review_interval = None;
+        let mut roles = Vec::new();
+
+        while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+            // Compliance fields use contextual keywords (plain idents)
+            match self.peek_kind().clone() {
+                TokenKind::Ident(ref s) if s == "risk" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    risk = Some(self.expect_ident("risk tier (low, medium, high, critical)")?);
+                }
+                TokenKind::Ident(ref s) if s == "frameworks" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    self.expect(&TokenKind::LBracket)?;
+                    while !self.check(&TokenKind::RBracket) && !self.check(&TokenKind::Eof) {
+                        frameworks.push(self.expect_ident("framework name")?);
+                        self.eat(&TokenKind::Comma);
+                    }
+                    self.expect(&TokenKind::RBracket)?;
+                }
+                TokenKind::Ident(ref s) if s == "audit" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    audit = Some(self.expect_ident("audit level (none, summary, full)")?);
+                }
+                TokenKind::Ident(ref s) if s == "retention" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    match self.peek_kind().clone() {
+                        TokenKind::StringLit(s) => {
+                            retention = Some(s.clone());
+                            self.advance();
+                        }
+                        _ => {
+                            let span = self.current_span();
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "retention period string (e.g. \"7y\")".to_string(),
+                                found: self.peek_kind().describe().to_string(),
+                                span: (span.start..span.end).into(),
+                            });
+                        }
+                    }
+                }
+                TokenKind::Ident(ref s) if s == "review_interval" => {
+                    self.advance();
+                    self.expect(&TokenKind::Colon)?;
+                    match self.peek_kind().clone() {
+                        TokenKind::StringLit(s) => {
+                            review_interval = Some(s.clone());
+                            self.advance();
+                        }
+                        _ => {
+                            let span = self.current_span();
+                            return Err(ParseError::UnexpectedToken {
+                                expected: "review interval string (e.g. \"90d\")".to_string(),
+                                found: self.peek_kind().describe().to_string(),
+                                span: (span.start..span.end).into(),
+                            });
+                        }
+                    }
+                }
+                TokenKind::Ident(ref s) if s == "roles" => {
+                    self.advance();
+                    self.expect(&TokenKind::LBrace)?;
+                    while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+                        let role = self.expect_ident("role name")?;
+                        self.expect(&TokenKind::Colon)?;
+                        match self.peek_kind().clone() {
+                            TokenKind::StringLit(s) => {
+                                roles.push(ComplianceRole {
+                                    role,
+                                    assignee: s.clone(),
+                                });
+                                self.advance();
+                            }
+                            _ => {
+                                let span = self.current_span();
+                                return Err(ParseError::UnexpectedToken {
+                                    expected: "assignee name string".to_string(),
+                                    found: self.peek_kind().describe().to_string(),
+                                    span: (span.start..span.end).into(),
+                                });
+                            }
+                        }
+                    }
+                    self.expect(&TokenKind::RBrace)?;
+                }
+                _ => {
+                    let span = self.current_span();
+                    return Err(ParseError::UnexpectedToken {
+                        expected: "compliance field (risk, frameworks, audit, retention, review_interval, roles)"
+                            .to_string(),
+                        found: self.peek_kind().describe().to_string(),
+                        span: (span.start..span.end).into(),
+                    });
+                }
+            }
+        }
+
+        self.expect(&TokenKind::RBrace)?;
+
+        Ok(ComplianceDecl {
+            name,
+            risk,
+            frameworks,
+            audit,
+            retention,
+            review_interval,
+            roles,
         })
     }
 

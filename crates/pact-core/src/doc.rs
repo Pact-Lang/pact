@@ -9,8 +9,8 @@
 
 use crate::ast::expr::ExprKind;
 use crate::ast::stmt::{
-    AgentBundleDecl, AgentDecl, DeclKind, DirectiveDecl, FlowDecl, Param, PermitNode, Program,
-    SchemaDecl, SkillDecl, TemplateDecl, TemplateEntry, TestDecl, ToolDecl,
+    AgentBundleDecl, AgentDecl, ComplianceDecl, DeclKind, DirectiveDecl, FlowDecl, Param,
+    PermitNode, Program, SchemaDecl, SkillDecl, TemplateDecl, TemplateEntry, TestDecl, ToolDecl,
 };
 use crate::ast::types::{TypeExpr, TypeExprKind};
 
@@ -32,6 +32,7 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
     let mut skills = Vec::new();
     let mut templates = Vec::new();
     let mut directives = Vec::new();
+    let mut compliances = Vec::new();
 
     for decl in &program.decls {
         match &decl.kind {
@@ -46,6 +47,7 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
             DeclKind::Skill(s) => skills.push(s),
             DeclKind::Template(t) => templates.push(t),
             DeclKind::Directive(d) => directives.push(d),
+            DeclKind::Compliance(c) => compliances.push(c),
             DeclKind::Import(_) => {}  // imports resolved by loader
             DeclKind::Connect(_) => {} // MCP connections are structural
             DeclKind::Lesson(_) => {}  // lessons handled separately
@@ -86,6 +88,9 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
     }
     if !directives.is_empty() {
         out.push_str("- [Directives](#directives)\n");
+    }
+    if !compliances.is_empty() {
+        out.push_str("- [Compliance](#compliance)\n");
     }
     out.push('\n');
 
@@ -177,6 +182,14 @@ pub fn generate_docs(program: &Program, title: &str) -> String {
         out.push_str("## Directives\n\n");
         for d in &directives {
             render_directive_doc(&mut out, d);
+        }
+    }
+
+    // Compliance
+    if !compliances.is_empty() {
+        out.push_str("## Compliance\n\n");
+        for c in &compliances {
+            render_compliance(&mut out, c);
         }
     }
 
@@ -467,6 +480,34 @@ fn render_skill(out: &mut String, skill: &SkillDecl) {
     // Return type
     if let Some(ret) = &skill.return_type {
         out.push_str(&format!("**Returns:** `{}`\n\n", format_type(ret)));
+    }
+}
+
+fn render_compliance(out: &mut String, c: &ComplianceDecl) {
+    out.push_str(&format!("### `{}`\n\n", c.name));
+    if let Some(risk) = &c.risk {
+        out.push_str(&format!("**Risk:** {}\n\n", risk));
+    }
+    if !c.frameworks.is_empty() {
+        let fws: Vec<String> = c.frameworks.iter().map(|f| format!("`{}`", f)).collect();
+        out.push_str(&format!("**Frameworks:** {}\n\n", fws.join(", ")));
+    }
+    if let Some(audit) = &c.audit {
+        out.push_str(&format!("**Audit:** {}\n\n", audit));
+    }
+    if let Some(retention) = &c.retention {
+        out.push_str(&format!("**Retention:** {}\n\n", retention));
+    }
+    if let Some(interval) = &c.review_interval {
+        out.push_str(&format!("**Review Interval:** {}\n\n", interval));
+    }
+    if !c.roles.is_empty() {
+        out.push_str("**Roles:**\n\n");
+        out.push_str("| Role | Assignee |\n|------|----------|\n");
+        for role in &c.roles {
+            out.push_str(&format!("| {} | {} |\n", role.role, role.assignee));
+        }
+        out.push('\n');
     }
 }
 

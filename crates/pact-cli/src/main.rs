@@ -73,7 +73,7 @@ enum Command {
         #[arg(long, default_value = "./pact-out")]
         out_dir: String,
 
-        /// Target platform (claude).
+        /// Target platform (claude, openai, crewai, cursor, gemini).
         #[arg(long, default_value = "claude")]
         target: String,
 
@@ -92,6 +92,10 @@ enum Command {
         /// Generate MCP server recommendations.
         #[arg(long)]
         recommend_mcp: bool,
+
+        /// Generate agent card JSON files for A2A discovery.
+        #[arg(long)]
+        agent_cards: bool,
     },
 
     /// Execute a flow from a .pact file.
@@ -250,6 +254,7 @@ fn main() -> Result<()> {
             claude_skill,
             claude_md,
             recommend_mcp,
+            agent_cards,
         } => cmd_build(
             &file,
             &out_dir,
@@ -258,6 +263,7 @@ fn main() -> Result<()> {
             claude_skill,
             claude_md,
             recommend_mcp,
+            agent_cards,
         ),
         Command::Run {
             file,
@@ -583,6 +589,7 @@ fn cmd_check(path: &str, watch: bool) -> Result<()> {
 }
 
 /// `pact build <file>` — compile to output artifacts.
+#[allow(clippy::too_many_arguments)]
 fn cmd_build(
     path: &str,
     out_dir: &str,
@@ -591,16 +598,23 @@ fn cmd_build(
     claude_skill: bool,
     claude_md: bool,
     recommend_mcp: bool,
+    agent_cards: bool,
 ) -> Result<()> {
     let (program, _sm) = load_and_check(path)?;
 
-    let target = Target::parse(target_str)
-        .ok_or_else(|| miette::miette!("unknown target '{}'. Supported: claude", target_str))?;
+    let target = Target::parse(target_str).ok_or_else(|| {
+        miette::miette!(
+            "unknown target '{}'. Supported: {}",
+            target_str,
+            Target::all_names().join(", ")
+        )
+    })?;
 
     let mut config = BuildConfig::new(path, out_dir, target);
     config.emit_claude_skill = claude_skill;
     config.emit_claude_md = claude_md;
     config.emit_mcp_recommendations = recommend_mcp;
+    config.emit_agent_cards = agent_cards;
 
     pact_build::build(&program, &config)
         .into_diagnostic()
@@ -628,6 +642,7 @@ fn cmd_build(
                 config.emit_claude_skill = claude_skill;
                 config.emit_claude_md = claude_md;
                 config.emit_mcp_recommendations = recommend_mcp;
+                config.emit_agent_cards = agent_cards;
                 match pact_build::build(&program, &config) {
                     Ok(()) => {
                         println!("Built to '{out_dir_owned}/' (target: {target_str_owned})");
@@ -1233,6 +1248,7 @@ fn cmd_list_declarations(path: &str) -> Result<()> {
             DeclKind::Import(_) => {}     // Resolved by loader
             DeclKind::Connect(_) => {}    // MCP connections
             DeclKind::Lesson(_) => {}     // Lessons are process memory
+            DeclKind::Compliance(_) => {} // Compliance is governance metadata
         }
     }
 
@@ -1854,11 +1870,12 @@ fn playground_list_decls(decls: &[Decl]) {
             DeclKind::Test(t) => tests.push(t.description.clone()),
             DeclKind::Skill(s) => skills.push(format!("${}", s.name)),
             DeclKind::PermitTree(_) => permit_trees += 1,
-            DeclKind::Template(_) => {}  // Templates are structural
-            DeclKind::Directive(_) => {} // Directives are structural
-            DeclKind::Import(_) => {}    // Resolved by loader
-            DeclKind::Connect(_) => {}   // MCP connections are structural
-            DeclKind::Lesson(_) => {}    // Lessons are process memory
+            DeclKind::Template(_) => {}   // Templates are structural
+            DeclKind::Directive(_) => {}  // Directives are structural
+            DeclKind::Import(_) => {}     // Resolved by loader
+            DeclKind::Connect(_) => {}    // MCP connections are structural
+            DeclKind::Lesson(_) => {}     // Lessons are process memory
+            DeclKind::Compliance(_) => {} // Compliance is governance metadata
         }
     }
 
@@ -2011,6 +2028,7 @@ fn playground_eval(
                     println!("Defined connect block ({})", names.join(", "));
                 }
                 DeclKind::Lesson(l) => println!("Defined lesson \"{}\"", l.name),
+                DeclKind::Compliance(c) => println!("Defined compliance \"{}\"", c.name),
             }
         }
 

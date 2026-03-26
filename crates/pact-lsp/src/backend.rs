@@ -486,6 +486,10 @@ fn check_error_span(err: &CheckError) -> miette::SourceSpan {
         CheckError::UnknownMcpServer { span, .. } => *span,
         CheckError::InvalidMcpTransport { span, .. } => *span,
         CheckError::InvalidLessonSeverity { span, .. } => *span,
+        CheckError::InvalidComplianceRisk { span, .. } => *span,
+        CheckError::InvalidComplianceAudit { span, .. } => *span,
+        CheckError::UnknownCompliance { span, .. } => *span,
+        CheckError::ComplianceSodConflict { span, .. } => *span,
     }
 }
 
@@ -856,6 +860,30 @@ fn find_hover_info(text: &str, offset: usize) -> Option<String> {
                 }
                 if let Some(rule) = &l.rule {
                     info.push_str(&format!("\n- **rule**: {}", rule));
+                }
+                return Some(info);
+            }
+            DeclKind::Compliance(c) => {
+                let mut info = format!("**compliance** `\"{}\"`\n", c.name);
+                if let Some(risk) = &c.risk {
+                    info.push_str(&format!("\n- **risk**: {}", risk));
+                }
+                if !c.frameworks.is_empty() {
+                    info.push_str(&format!("\n- **frameworks**: {}", c.frameworks.join(", ")));
+                }
+                if let Some(audit) = &c.audit {
+                    info.push_str(&format!("\n- **audit**: {}", audit));
+                }
+                if let Some(retention) = &c.retention {
+                    info.push_str(&format!("\n- **retention**: {}", retention));
+                }
+                if !c.roles.is_empty() {
+                    let roles: Vec<String> = c
+                        .roles
+                        .iter()
+                        .map(|r| format!("{}: {}", r.role, r.assignee))
+                        .collect();
+                    info.push_str(&format!("\n- **roles**: {}", roles.join(", ")));
                 }
                 return Some(info);
             }

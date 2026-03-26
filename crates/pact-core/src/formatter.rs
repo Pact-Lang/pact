@@ -18,9 +18,9 @@
 
 use crate::ast::expr::{BinOpKind, Expr, ExprKind, MatchPattern};
 use crate::ast::stmt::{
-    AgentBundleDecl, AgentDecl, Decl, DeclKind, DirectiveDecl, FlowDecl, Param, PermitNode,
-    PermitTreeDecl, Program, SchemaDecl, SchemaField, SkillDecl, TemplateDecl, TemplateEntry,
-    TestDecl, ToolDecl, TypeAliasDecl,
+    AgentBundleDecl, AgentDecl, ComplianceDecl, Decl, DeclKind, DirectiveDecl, FlowDecl, Param,
+    PermitNode, PermitTreeDecl, Program, SchemaDecl, SchemaField, SkillDecl, TemplateDecl,
+    TemplateEntry, TestDecl, ToolDecl, TypeAliasDecl,
 };
 use crate::ast::types::{TypeExpr, TypeExprKind};
 
@@ -142,6 +142,7 @@ impl Formatter {
                 self.dedent();
                 self.push_line("}");
             }
+            DeclKind::Compliance(c) => self.format_compliance(c),
         }
     }
 
@@ -548,6 +549,47 @@ impl Formatter {
                     self.newline();
                 }
             }
+        }
+        self.dedent();
+        self.push_line("}");
+    }
+
+    // -- compliance ---------------------------------------------------------
+
+    fn format_compliance(&mut self, c: &ComplianceDecl) {
+        self.push_line(&format!("compliance \"{}\" {{", c.name));
+        self.indent();
+        if let Some(risk) = &c.risk {
+            self.push_line(&format!("risk: {}", risk));
+        }
+        if !c.frameworks.is_empty() {
+            self.push_indent();
+            self.push("frameworks: [");
+            for (i, fw) in c.frameworks.iter().enumerate() {
+                if i > 0 {
+                    self.push(", ");
+                }
+                self.push(fw);
+            }
+            self.push("]\n");
+        }
+        if let Some(audit) = &c.audit {
+            self.push_line(&format!("audit: {}", audit));
+        }
+        if let Some(retention) = &c.retention {
+            self.push_line(&format!("retention: \"{}\"", retention));
+        }
+        if let Some(interval) = &c.review_interval {
+            self.push_line(&format!("review_interval: \"{}\"", interval));
+        }
+        if !c.roles.is_empty() {
+            self.push_line("roles {");
+            self.indent();
+            for role in &c.roles {
+                self.push_line(&format!("{}: \"{}\"", role.role, role.assignee));
+            }
+            self.dedent();
+            self.push_line("}");
         }
         self.dedent();
         self.push_line("}");
@@ -1017,5 +1059,33 @@ type Tone = Formal | Casual | Friendly
         let first = roundtrip(src);
         let second = roundtrip(&first);
         assert_eq!(first, second, "Formatter is not idempotent");
+    }
+
+    #[test]
+    fn format_compliance_roundtrip() {
+        let src = r#"compliance "payment_processing" {
+    risk: high
+    frameworks: [pci_dss, gdpr, sox]
+    audit: full
+    retention: "7y"
+    review_interval: "90d"
+    roles {
+        approver: "finance_lead"
+        executor: "payment_agent"
+        auditor: "compliance_team"
+    }
+}
+"#;
+        let out = roundtrip(src);
+        assert!(out.contains("compliance \"payment_processing\" {"));
+        assert!(out.contains("risk: high"));
+        assert!(out.contains("frameworks: [pci_dss, gdpr, sox]"));
+        assert!(out.contains("audit: full"));
+        assert!(out.contains("retention: \"7y\""));
+        assert!(out.contains("review_interval: \"90d\""));
+        assert!(out.contains("roles {"));
+        assert!(out.contains("approver: \"finance_lead\""));
+        assert!(out.contains("executor: \"payment_agent\""));
+        assert!(out.contains("auditor: \"compliance_team\""));
     }
 }
