@@ -197,6 +197,11 @@ impl<'a> AgentFlowParser<'a> {
             return self.parse_container_start(trimmed, "testCase", ContainerKind::TestCase);
         }
 
+        // `group id["Label"]` — layout group container (passthrough, no PACT mapping).
+        if trimmed.starts_with("group ") {
+            return self.parse_container_start(trimmed, "group", ContainerKind::Group);
+        }
+
         // Legacy `subgraph id["@name"]` or `subgraph id["@name"]@{...}`
         if trimmed.starts_with("subgraph ") {
             return self.parse_container_start(trimmed, "subgraph", ContainerKind::Subgraph);
@@ -1023,6 +1028,7 @@ impl<'a> AgentFlowParser<'a> {
                     agent,
                     tool,
                     args,
+                    skill: None, // Skills are resolved from agent context, not from diagram syntax
                 });
             }
         }
@@ -2234,5 +2240,83 @@ agentflow TB
         let graph = parse_agentflow_text(input).unwrap();
         assert_eq!(graph.agents.len(), 1);
         assert_eq!(graph.flows.len(), 1);
+    }
+
+    #[test]
+    fn parse_group_containers() {
+        let input = r#"agentflow TB
+group apa[" "]
+  type Issue = Record {
+    id: Int
+    title: String
+  }
+
+agent researcher["Researcher"]
+    search
+end
+researcher@{
+    permits: "net.read"
+}
+end
+group other[" "]
+  data_driven["Data Driven"]
+  data_driven@{ shape: trapezoid }
+end
+other@{algorithm: elk.box}
+group permissions[" "]
+  net{{net}}
+  net -->> net_read
+end
+permissions@{algorithm: elk.layered}
+"#;
+        let graph = parse_agentflow_text(input).unwrap();
+        // Types parsed through group boundary.
+        assert_eq!(graph.types.len(), 1);
+        assert_eq!(graph.types[0].name, "Issue");
+        // Agent parsed through group boundary.
+        assert_eq!(graph.agents.len(), 1);
+        assert_eq!(graph.agents[0].id, "researcher");
+        // Delegation edges parsed through group boundary.
+        let delegation_edges: Vec<_> = graph
+            .edges
+            .iter()
+            .filter(|e| e.edge_type == EdgeType::Delegation)
+            .collect();
+        assert_eq!(delegation_edges.len(), 1);
+    }
+
+    #[test]
+    fn parse_group_with_tests() {
+        let input = r#"agentflow TB
+group tests[" "]
+  testCase test_1["full analysis produces report"]
+    test_1_assertion["assert"]
+  end
+  test_1_assertion@{ shape: double-circle }
+  test_1@{
+      view: collapsed
+      assert: "full analysis produces report"
+  }
+end
+tests@{algorithm: elk.box}
+"#;
+        let graph = parse_agentflow_text(input).unwrap();
+        assert_eq!(graph.tests.len(), 1);
+        assert_eq!(graph.tests[0].label, "full analysis produces report");
+    }
+
+    #[test]
+    fn parse_types_collapsed_metadata() {
+        // `types@{ view: collapsed }` is a layout hint and should not break parsing.
+        let input = r#"agentflow TB
+  type Priority = P0 | P1 | P2
+
+types@{
+    view: collapsed
+}
+"#;
+        let graph = parse_agentflow_text(input).unwrap();
+        assert_eq!(graph.types.len(), 1);
+        assert_eq!(graph.types[0].name, "Priority");
     }
 }

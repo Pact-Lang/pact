@@ -219,7 +219,7 @@ pub fn pact_to_agentflow_graph(program: &Program) -> AgentFlowGraph {
                 graph.edges.extend(flow_edges);
 
                 // Extract flow steps for task-based emission.
-                let flow_def = extract_flow_def(f);
+                let flow_def = extract_flow_def(f, &graph);
                 graph.flows.push(flow_def);
             }
             DeclKind::Lesson(l) => {
@@ -362,16 +362,19 @@ fn extract_flow_edges(body: &[pact_core::ast::expr::Expr], edges: &mut Vec<Agent
 }
 
 /// Extract a flow definition with its steps from a FlowDecl.
-fn extract_flow_def(f: &FlowDecl) -> AgentFlowDef {
+/// Uses the graph's agents to resolve skill membership for each tool.
+fn extract_flow_def(f: &FlowDecl, graph: &AgentFlowGraph) -> AgentFlowDef {
     let mut steps = Vec::new();
     for expr in &f.body {
         if let ExprKind::Assign { name, value } = &expr.kind {
             if let Some((agent_name, tool_name, args)) = extract_full_dispatch_info(value) {
+                let skill = find_skill_for_tool(graph, &agent_name, &tool_name);
                 steps.push(AgentFlowStep {
                     output_var: name.clone(),
                     agent: agent_name,
                     tool: tool_name,
                     args,
+                    skill,
                 });
             } else if let ExprKind::RunFlow {
                 flow_name, args, ..
@@ -382,6 +385,7 @@ fn extract_flow_def(f: &FlowDecl) -> AgentFlowDef {
                     agent: format!("flow:{}", flow_name),
                     tool: flow_name.clone(),
                     args: extract_arg_names(args),
+                    skill: None,
                 });
             }
         }
@@ -459,6 +463,22 @@ fn extract_arg_names(args: &[pact_core::ast::expr::Expr]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// Find which skill (if any) a tool belongs to on a given agent.
+fn find_skill_for_tool(graph: &AgentFlowGraph, agent_name: &str, tool_name: &str) -> Option<String> {
+    let tool_ref = format!("#{}", tool_name);
+    graph
+        .agents
+        .iter()
+        .find(|a| a.id == agent_name)
+        .and_then(|agent| {
+            agent
+                .skills
+                .iter()
+                .find(|skill| skill.metadata.tools.contains(&tool_ref))
+                .map(|skill| skill.id.clone())
+        })
 }
 
 // ── Tool/Skill decl → node ─────────────────────────────────────────────────
@@ -579,102 +599,134 @@ fn emit_agentflow_text(graph: &AgentFlowGraph, program: &Program) -> String {
     let mut out = String::new();
     out.push_str(&format!("agentflow {}\n", graph.direction));
 
-    // ── Type declarations ─────────────────────────────────────────────────
-    for ty in &graph.types {
-        emit_type_decl(&mut out, ty);
-    }
-    // Legacy type_aliases that aren't already in types.
-    for ta in &graph.type_aliases {
-        let already_in_types = graph.types.iter().any(|t| t.name == ta.name);
-        if !already_in_types {
+    // ── Group: types + agents ("apa") ─────────────────────────────────────
+    let has_types = !graph.types.is_empty() || !graph.type_aliases.is_empty();
+    let has_agents = !graph.bundles.is_empty() || !graph.agents.is_empty();
+    if has_types || has_agents {
+        out.push_str("group apa[\" \"]\n");
+
+        // Type declarations.
+        for ty in &graph.types {
+            emit_type_decl(&mut out, ty);
+        }
+        for ta in &graph.type_aliases {
+            let already_in_types = graph.types.iter().any(|t| t.name == ta.name);
+            if !already_in_types {
+                out.push_str(&format!(
+                    "  type {} = {}\n",
+                    ta.name,
+                    ta.variants.join(" | ")
+                ));
+            }
+        }
+        if has_types {
+            out.push('\n');
+        }
+
+        // Agent containers (bundles + standalone).
+        let bundled_agents: Vec<&str> = graph
+            .bundles
+            .iter()
+            .flat_map(|b| b.agents.iter().map(|s| s.as_str()))
+            .collect();
+
+        for bundle in &graph.bundles {
             out.push_str(&format!(
-                "  type {} = {}\n",
-                ta.name,
-                ta.variants.join(" | ")
+                "\nagent {}[\"{}\"]\n",
+                bundle.id,
+                to_title_case(&bundle.id)
             ));
+
+            for agent in &graph.agents {
+                if bundle.agents.contains(&agent.id) {
+                    emit_agent_block(&mut out, agent, "    ");
+                }
+            }
+
+            // Emit fallback edges between agents within the bundle.
+            if let Some(fb) = &bundle.fallbacks {
+                let parts: Vec<&str> = fb.split("?>").map(|s| s.trim()).collect();
+                for i in 0..parts.len().saturating_sub(1) {
+                    out.push_str(&format!("    {} --x {}\n", parts[i], parts[i + 1]));
+                }
+            }
+
+            out.push_str("  end\n");
+            let mut bundle_meta = vec!["view: collapsed".to_string()];
+            if let Some(fb) = &bundle.fallbacks {
+                bundle_meta.push(format!("fallbacks: \"{}\"", fb));
+            }
+            out.push_str(&format!("  {}@{{\n", bundle.id));
+            for part in &bundle_meta {
+                out.push_str(&format!("    {}\n", part));
+            }
+            out.push_str("}\n");
         }
-    }
-    if !graph.types.is_empty() || !graph.type_aliases.is_empty() {
-        out.push('\n');
-    }
 
-    // ── Agent containers ──────────────────────────────────────────────────
-    let bundled_agents: Vec<&str> = graph
-        .bundles
-        .iter()
-        .flat_map(|b| b.agents.iter().map(|s| s.as_str()))
-        .collect();
-
-    for bundle in &graph.bundles {
-        out.push_str(&format!(
-            "\nagent {}[\"{}\"]\n",
-            bundle.id,
-            to_title_case(&bundle.id)
-        ));
-
+        // Unbundled agents.
         for agent in &graph.agents {
-            if bundle.agents.contains(&agent.id) {
-                emit_agent_block(&mut out, agent, "    ");
+            if !bundled_agents.contains(&agent.id.as_str()) {
+                emit_agent_block(&mut out, agent, "");
             }
         }
 
-        // Emit fallback edges between agents within the bundle.
-        if let Some(fb) = &bundle.fallbacks {
-            // Parse "a ?> b" patterns into --x edges.
-            let parts: Vec<&str> = fb.split("?>").map(|s| s.trim()).collect();
-            for i in 0..parts.len().saturating_sub(1) {
-                out.push_str(&format!("    {} --x {}\n", parts[i], parts[i + 1]));
+        out.push_str("end\n");
+    }
+
+    // ── Group: directives + lessons ("other") ─────────────────────────────
+    let has_directives = !graph.directives.is_empty();
+    let has_lessons = !graph.lessons.is_empty();
+    if has_directives || has_lessons {
+        out.push_str("group other[\" \"]\n");
+
+        for dir in &graph.directives {
+            emit_directive_node(&mut out, dir);
+        }
+
+        if has_lessons {
+            for lesson in &graph.lessons {
+                emit_lesson_node(&mut out, lesson);
             }
         }
 
-        out.push_str("  end\n");
-        let mut bundle_meta = vec!["view: collapsed".to_string()];
-        if let Some(fb) = &bundle.fallbacks {
-            bundle_meta.push(format!("fallbacks: \"{}\"", fb));
-        }
-        out.push_str(&format!("  {}@{{\n", bundle.id));
-        for part in &bundle_meta {
-            out.push_str(&format!("    {}\n", part));
-        }
-        out.push_str("  }\n");
+        out.push_str("end\n");
+        out.push_str("other@{algorithm: elk.box}\n");
     }
 
-    // Emit unbundled agents as standalone definitions.
-    for agent in &graph.agents {
-        if !bundled_agents.contains(&agent.id.as_str()) {
-            emit_agent_block(&mut out, agent, "");
-        }
-    }
-
-    // ── Directive nodes ────────────────────────────────────────────────
-    for dir in &graph.directives {
-        emit_directive_node(&mut out, dir);
-    }
-
-    // ── Lesson nodes ────────────────────────────────────────────────────
-    if !graph.lessons.is_empty() {
-        out.push('\n');
-        for lesson in &graph.lessons {
-            emit_lesson_node(&mut out, lesson);
-        }
-    }
-
-    // ── Permission tree nodes ───────────────────────────────────────────
-    // Emit permission tree nodes from delegation edges in the graph.
+    // ── Group: permissions ────────────────────────────────────────────────
     let permit_edges: Vec<&AgentFlowEdge> = graph
         .edges
         .iter()
         .filter(|e| e.edge_type == EdgeType::Delegation)
         .collect();
     if !permit_edges.is_empty() {
-        out.push('\n');
-        // Emit edges; nodes are emitted via deferred metadata from the program.
-        for edge in &permit_edges {
-            out.push_str(&format!("{} -->> {}\n", edge.from, edge.to));
-        }
-    }
+        out.push_str("group permissions[\" \"]\n");
 
-    out.push('\n');
+        // Collect parent node IDs — nodes that have children (outgoing delegation).
+        let parent_ids: std::collections::HashSet<&str> = permit_edges
+            .iter()
+            .map(|e| e.from.as_str())
+            .collect();
+
+        // Emit permission category parent nodes as hexagons.
+        let mut emitted_parents = std::collections::HashSet::new();
+        for &parent_id in &parent_ids {
+            if emitted_parents.insert(parent_id) {
+                out.push_str(&format!(
+                    "  {}{{{{{}}}}}\n",
+                    parent_id, parent_id
+                ));
+            }
+        }
+
+        // Emit delegation edges.
+        for edge in &permit_edges {
+            out.push_str(&format!("  {} -->> {}\n", edge.from, edge.to));
+        }
+
+        out.push_str("end\n");
+        out.push_str("permissions@{algorithm: elk.layered}\n");
+    }
 
     // ── Flows: detailed task blocks ─────────────────────────────────────
     let pipeline_flow = graph
@@ -694,78 +746,35 @@ fn emit_agentflow_text(graph: &AgentFlowGraph, program: &Program) -> String {
     // ── Templates ─────────────────────────────────────────────────────
     emit_templates(&mut out, program);
 
-    // ── Test cases ─────────────────────────────────────────────────────
-    for test in &graph.tests {
-        emit_test_case(&mut out, test);
-    }
-
-    // ── Test reference edges ─────────────────────────────────────────
+    // ── Group: tests ──────────────────────────────────────────────────
     let test_edges: Vec<&AgentFlowEdge> = graph
         .edges
         .iter()
         .filter(|e| e.from.starts_with("test_") && e.edge_type == EdgeType::Reference)
         .collect();
-    if !test_edges.is_empty() {
-        out.push('\n');
-        for edge in &test_edges {
-            out.push_str(&format!("{} -.-> {}\n", edge.from, edge.to));
+
+    if !graph.tests.is_empty() {
+        out.push_str("group tests[\" \"]\n");
+
+        for test in &graph.tests {
+            emit_test_case(&mut out, test);
         }
-    }
 
-    // ── Invisible layout edges ──────────────────────────────────────────
-    // Chain one representative node from each top-level section with ~~~
-    // so Mermaid's auto-layout keeps them close instead of scattering.
-    let mut anchors: Vec<String> = Vec::new();
-
-    // Bundles / standalone agents.
-    if let Some(b) = graph.bundles.first() {
-        anchors.push(b.id.clone());
-    } else if let Some(a) = graph.agents.first() {
-        anchors.push(a.id.clone());
-    }
-
-    // Directives.
-    if let Some(d) = graph.directives.first() {
-        anchors.push(d.id.clone());
-    }
-
-    // Lessons.
-    if let Some(l) = graph.lessons.first() {
-        anchors.push(l.id.clone());
-    }
-
-    // Flows.
-    if let Some(f) = graph.flows.first() {
-        anchors.push(f.name.clone());
-    }
-
-    // Tests.
-    if let Some(t) = graph.tests.first() {
-        anchors.push(t.id.clone());
-    }
-
-    // Permission tree roots.
-    if let Some(e) = permit_edges.first() {
-        anchors.push(e.from.clone());
-    }
-
-    if anchors.len() > 1 {
-        out.push('\n');
-        // Arrange in a grid (sqrt(n) columns) for a ~1:1 aspect ratio
-        // instead of a single long chain.
-        let cols = (anchors.len() as f64).sqrt().ceil() as usize;
-        let rows: Vec<&[String]> = anchors.chunks(cols).collect();
-
-        // Horizontal edges within each row.
-        for row in &rows {
-            for pair in row.windows(2) {
-                out.push_str(&format!("{} ~~~ {}\n", pair[0], pair[1]));
+        // Test reference edges inside the group.
+        if !test_edges.is_empty() {
+            out.push('\n');
+            for edge in &test_edges {
+                out.push_str(&format!("  {} -.-> {}\n", edge.from, edge.to));
             }
         }
-        // Vertical edges between rows (first element of each row).
-        for pair in rows.windows(2) {
-            out.push_str(&format!("{} ~~~ {}\n", pair[0][0], pair[1][0]));
-        }
+
+        out.push_str("end\n");
+        out.push_str("tests@{algorithm: elk.box}\n");
+    }
+
+    // ── Collapsed types metadata ─────────────────────────────────────────
+    if has_types {
+        out.push_str("\n\n\ntypes@{\n    view: collapsed\n}\n");
     }
 
     out
@@ -926,19 +935,49 @@ fn emit_flow_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlowGrap
         let agent_id = format!("{fp}_agent_s{n}");
 
         out.push_str(&format!("      task {step_label}[\"Step {n}\"]\n"));
-        out.push_str(&format!(
-            "        {agent_id}[\"{}\"] --- {tool_id}[\"{}\"] --> {out_id}[\"{}\"]\n",
-            step.agent, step.tool, step.output_var
-        ));
-        out.push_str("      end\n\n");
 
-        // Collect deferred metadata (emitted outside flow container).
-        deferred_meta.push(format!(
-            "{agent_id}@{{ shape: tag-rect, type: \"{}\" }}",
-            step.agent
-        ));
-        deferred_meta.push(format!("{tool_id}@{{ shape: subroutine }}"));
-        deferred_meta.push(format!("{out_id}@{{ shape: doc }}"));
+        // Agent dispatches to tool (via skill if present), then agent produces the output.
+        if let Some(skill_name) = &step.skill {
+            let skill_id = format!("{fp}_{skill_name}_s{n}");
+            out.push_str(&format!(
+                "        {agent_id}[\"{}\"] --- {skill_id}[\"{}\"] --- {tool_id}[\"{}\"]\n",
+                step.agent,
+                to_title_case(skill_name),
+                step.tool
+            ));
+            out.push_str(&format!(
+                "        {agent_id} --> {out_id}[\"{}\"]\n",
+                step.output_var
+            ));
+            out.push_str("      end\n\n");
+
+            deferred_meta.push(format!(
+                "{agent_id}@{{ def: {}, shape: tag-rect }}",
+                step.agent
+            ));
+            deferred_meta.push(format!(
+                "{skill_id}@{{ def: {skill_name}, shape: stadium }}"
+            ));
+            deferred_meta.push(format!("{tool_id}@{{ shape: subroutine }}"));
+            deferred_meta.push(format!("{out_id}@{{ shape: doc }}"));
+        } else {
+            out.push_str(&format!(
+                "        {agent_id}[\"{}\"] --- {tool_id}[\"{}\"]\n",
+                step.agent, step.tool
+            ));
+            out.push_str(&format!(
+                "        {agent_id} --> {out_id}[\"{}\"]\n",
+                step.output_var
+            ));
+            out.push_str("      end\n\n");
+
+            deferred_meta.push(format!(
+                "{agent_id}@{{ def: {}, shape: tag-rect }}",
+                step.agent
+            ));
+            deferred_meta.push(format!("{tool_id}@{{ shape: subroutine }}"));
+            deferred_meta.push(format!("{out_id}@{{ shape: doc }}"));
+        }
     }
 
     // Emit linear chain edges between steps.
@@ -1040,11 +1079,11 @@ fn emit_pipeline_tasks(out: &mut String, flow: &AgentFlowDef, _graph: &AgentFlow
         } else {
             let agent_ref = format!("s{}", i + 1);
             out.push_str(&format!(
-                "        {}[\"{}\"]@{{ shape: tag-rect, type: \"{}\" }} --- {}@{{ shape: subroutine }}\n",
+                "        {}[\"{}\"]@{{ def: {}, shape: tag-rect }} --- {}@{{ shape: subroutine }}\n",
                 agent_ref, step.agent, step.agent, step.tool
             ));
             out.push_str(&format!(
-                "        {} --o {}@{{ shape: doc }}\n",
+                "        {} --> {}@{{ shape: doc }}\n",
                 agent_ref, step.output_var
             ));
         }
@@ -1367,12 +1406,19 @@ fn emit_lesson_node(out: &mut String, lesson: &AgentFlowLessonNode) {
 /// Emit a test case as a testCase container.
 fn emit_test_case(out: &mut String, test: &AgentFlowTestCase) {
     let assertion_id = format!("{}_assertion", test.id);
-    out.push_str(&format!("\ntestCase {}[\"{}\"]\n", test.id, test.label));
+    // Use the test description as label for the testCase container.
+    let label = if let Some(desc) = &test.metadata.assert_expr {
+        desc.clone()
+    } else {
+        test.label.clone()
+    };
+    out.push_str(&format!("\ntestCase {}[\"{}\"]\n", test.id, label));
     out.push_str(&format!("  {}[\"assert\"]\n", assertion_id));
     out.push_str("end\n");
     out.push_str(&format!("{}@{{ shape: double-circle }}\n", assertion_id));
 
-    let mut meta_parts = Vec::new();
+    // Collapse long test descriptions to keep the diagram tidy.
+    let mut meta_parts = vec!["view: collapsed".to_string()];
     if let Some(assert_expr) = &test.metadata.assert_expr {
         meta_parts.push(format!("assert: \"{}\"", assert_expr.replace('"', "\\\"")));
     }
@@ -1993,5 +2039,137 @@ mod tests {
         } else {
             panic!("Expected Record type");
         }
+    }
+
+    #[test]
+    fn skill_in_flow_step_emits_stadium_node() {
+        // Build a program with agent that has a skill containing a tool,
+        // and a flow that dispatches through that tool.
+        let src = r#"
+permit_tree { ^llm { ^llm.query } }
+
+tool #summarize {
+    description: <<Summarize content.>>
+    requires: [^llm.query]
+    params { content :: String }
+    returns :: String
+}
+
+skill $research_skill {
+    description: <<Research and summarize.>>
+    tools: [#summarize]
+    strategy: <<Summarize then verify.>>
+    params { topic :: String }
+    returns :: String
+}
+
+agent @researcher {
+    permits: [^llm.query]
+    tools: [#summarize]
+    skills: [$research_skill]
+    model: "claude-sonnet-4-20250514"
+    prompt: <<You research things.>>
+}
+
+flow research(topic :: String) -> String {
+    summary = @researcher -> #summarize(topic)
+    return summary
+}
+"#;
+        let program = parse_program(src);
+        let text = pact_to_agentflow(&program);
+
+        // The skill should appear as an intermediate node in the task step.
+        assert!(
+            text.contains("research_skill"),
+            "Expected skill node in flow step, got:\n{text}"
+        );
+        // Skill node should have stadium shape with def reference.
+        assert!(
+            text.contains("shape: stadium"),
+            "Expected stadium shape for skill node"
+        );
+        assert!(
+            text.contains("def: research_skill"),
+            "Expected def: reference for skill node"
+        );
+    }
+
+    #[test]
+    fn no_skill_when_tool_not_in_skill() {
+        let src = r#"
+permit_tree { ^llm { ^llm.query } }
+
+tool #write {
+    description: <<Write content.>>
+    requires: [^llm.query]
+    params { topic :: String }
+    returns :: String
+}
+
+agent @writer {
+    permits: [^llm.query]
+    tools: [#write]
+    prompt: <<You write things.>>
+}
+
+flow draft(topic :: String) -> String {
+    result = @writer -> #write(topic)
+    return result
+}
+"#;
+        let program = parse_program(src);
+        let text = pact_to_agentflow(&program);
+
+        // No skill node — direct agent-to-tool connection.
+        assert!(
+            text.contains("--- draft_write_s1"),
+            "Expected direct agent-to-tool edge, got:\n{text}"
+        );
+        assert!(
+            !text.contains("stadium"),
+            "Should not have stadium shape without skills"
+        );
+    }
+
+    #[test]
+    fn groups_wrap_sections() {
+        let src = r#"
+permit_tree { ^llm { ^llm.query } }
+
+tool #search {
+    description: <<Search the web.>>
+    requires: [^llm.query]
+    params { query :: String }
+    returns :: String
+}
+
+agent @researcher {
+    permits: [^llm.query]
+    tools: [#search]
+    prompt: <<Research.>>
+}
+
+flow find(query :: String) -> String {
+    result = @researcher -> #search(query)
+    return result
+}
+"#;
+        let program = parse_program(src);
+        let text = pact_to_agentflow(&program);
+
+        // Should have group containers instead of ~~~ edges.
+        assert!(
+            text.contains("group apa"),
+            "Expected group apa container"
+        );
+        assert!(
+            text.contains("group permissions"),
+            "Expected group permissions container"
+        );
+        assert!(
+            !text.contains("~~~"),
+            "Should not have invisible layout edges"
+        );
     }
 }

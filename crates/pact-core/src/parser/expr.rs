@@ -80,12 +80,15 @@ impl<'t> Parser<'t> {
             });
         }
 
-        // Try assignment: `ident = expr`
-        if let TokenKind::Ident(name) = self.peek_kind() {
+        // Try assignment: `ident = expr` (including contextual keywords as variable names)
+        let maybe_name = match self.peek_kind() {
+            TokenKind::Ident(name) => Some(name.clone()),
+            tok => tok.as_contextual_ident().map(String::from),
+        };
+        if let Some(name) = maybe_name {
             if self.peek_next_kind() == &TokenKind::Eq {
                 let start = self.current_span();
-                let name = name.clone();
-                self.advance(); // ident
+                self.advance(); // ident or contextual keyword
                 self.advance(); // =
                 let value = self.parse_expr()?;
                 let span = start.merge(value.span);
@@ -440,6 +443,16 @@ impl<'t> Parser<'t> {
             // Identifier
             TokenKind::Ident(name) => {
                 let name = name.clone();
+                self.advance();
+                Ok(Expr {
+                    kind: ExprKind::Ident(name),
+                    span,
+                })
+            }
+
+            // Contextual keyword used as identifier (e.g. `endpoint` as a variable)
+            ref tok if tok.as_contextual_ident().is_some() => {
+                let name = tok.as_contextual_ident().unwrap().to_string();
                 self.advance();
                 Ok(Expr {
                     kind: ExprKind::Ident(name),

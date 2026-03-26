@@ -1765,6 +1765,7 @@ dependencies = [
 name = "pact-wasm"
 version = "0.1.0"
 dependencies = [
+ "pact-build",
  "pact-core",
  "pact-mermaid",
  "serde",

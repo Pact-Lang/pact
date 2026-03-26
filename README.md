@@ -4,7 +4,7 @@
 
 PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. Write once, deploy to **Claude, OpenAI, CrewAI, Cursor, and Gemini**. The result: AI agent systems you can reason about, audit, and trust.
 
-**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | remote agent federation | package registry | streaming responses | MCP server | LSP + VS Code | WASM module | Mermaid agentflow diagrams
+**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | remote agent federation with trust boundaries | package registry | streaming responses | MCP server (stdio + SSE) | LSP + VS Code | WASM module (7 exports) | Mermaid agentflow diagrams (bidirectional) | CI pipeline | 783+ tests
 
 ## Why PACT?
 
@@ -303,6 +303,34 @@ Each agent in your program produces a structured JSON card describing its capabi
 
 Agent cards enable automated discovery in multi-agent systems -- other agents and orchestrators can query what an agent can do, what permissions it holds, and what compliance posture it maintains.
 
+## Remote Agent Federation
+
+PACT supports cross-network agent orchestration through its federation system. Declare trusted remote registries with explicit permission boundaries, then dispatch work to remote agents as naturally as local ones:
+
+```pact
+federation {
+    "https://agents.example.com/registry" trust: [^llm.query, ^net.read]
+    "https://internal.corp.net/agents"    trust: [^data.read, ^data.write]
+}
+
+agent @archivist {
+    permits: [^data.read, ^data.write]
+    tools: [#store]
+    endpoint: "https://internal.corp.net/agents/archivist"
+    prompt: <<Archive and store research findings.>>
+}
+
+flow research_and_archive(topic :: String) -> String {
+    results = @researcher -> #search(topic)       -- local agent
+    saved   = @archivist  -> #store(results)      -- remote agent
+    return saved
+}
+```
+
+**Trust boundaries** are enforced at dispatch time. If a remote agent requires permissions not covered by the federation trust list, dispatch is rejected before any network call is made. This extends PACT's compile-time safety model to distributed agent systems.
+
+See `examples/federation.pact` for a complete working example.
+
 ## MCP Server
 
 PACT includes a built-in Model Context Protocol (MCP) server, allowing AI agents and tools to interact with PACT programs over both stdio and SSE transports:
@@ -317,14 +345,73 @@ pact-mcp --sse --port 3000
 
 The MCP server exposes PACT's type checking, build, and documentation capabilities as MCP tools, enabling any MCP-compatible client to work with `.pact` files programmatically.
 
+## WASM Module
+
+PACT compiles to WebAssembly for browser and embedded use. The `pact-wasm` package exposes 7 functions:
+
+```javascript
+import init, {
+  pact_check,            // Validate syntax and semantics
+  pact_fmt,              // Format to canonical style
+  pact_doc,              // Generate Markdown documentation
+  pact_agent_cards,      // Generate A2A agent card JSON
+  pact_to_agentflow,     // Convert .pact to Mermaid agentflow diagram
+  pact_to_agentflow_json,// Convert .pact to agentflow JSON AST
+  agentflow_to_pact,     // Convert Mermaid agentflow to .pact source
+} from './pkg/pact_wasm.js';
+
+await init();
+
+const result = pact_check('agent @g { permits: [^llm.query] tools: [#greet] }');
+console.log(result); // "OK"
+
+const mermaid = pact_to_agentflow(source);  // Generate agentflow diagram
+const pactSrc = agentflow_to_pact(mermaid); // Round-trip back to PACT
+```
+
+Build from source:
+
+```bash
+make wasm              # Build WASM package to pkg/
+make wasm-test         # Run WASM native tests
+```
+
+## Mermaid Agentflow Diagrams
+
+PACT supports bidirectional conversion with Mermaid's `agentflow` diagram type. Export any PACT program as a visual agent architecture diagram, or import an agentflow diagram as PACT source:
+
+```bash
+pact to-mermaid examples/website_builder.pact -o diagram.mmd
+pact from-mermaid diagram.mmd -o generated.pact
+```
+
+The agentflow emitter produces structured diagrams with:
+- **Agent subgraphs** containing tools, skills, and metadata
+- **Flow rendering** with dispatch, pipeline, and fallback edges
+- **Group containers** with ELK layout algorithms for organized visual structure
+- **Skill nodes** rendered as intermediate `stadium`-shaped nodes in flow steps
+- **Collapsed type sections** for cleaner diagrams
+- **Permission delegation** visualized with hierarchical edges
+
+This is developed in collaboration with the Mermaid team as part of the agentflow spec.
+
 ## Examples
 
 | File | Description |
 |------|-------------|
 | `hello_agent.pact` | Minimal agent with a single tool and flow |
+| `my_first.pact` | Simple first PACT agent contract |
 | `research_flow.pact` | Multi-agent research with fallback chains |
 | `website_builder.pact` | Bilingual website generator with templates, directives, and source providers |
+| `coffee_website.pact` | Full feature showcase -- every PACT language construct in one file |
 | `age_verified_website.pact` | Age-gated content with compliance guardrails |
+| `federation.pact` | Cross-network agent federation with trust boundaries |
+| `data_analyst.pact` | Data pipeline -- fetch, clean, transform, analyze, and visualize |
+| `customer_support.pact` | Intent classification, routing, and conversation context |
+| `code_review.pact` | AI-powered code review for quality, security, and performance |
+| `ci_agent.pact` | CI/CD pipeline agent -- tests, linting, build, and reporting |
+| `incident_response.pact` | 5-agent incident response orchestration |
+| `rag_pipeline.pact` | RAG pipeline with search, synthesis, citations, and validation |
 
 Run any example:
 
@@ -361,17 +448,32 @@ Write 10 lines of PACT. Get production-grade guardrails for free.
   │  Parser  │   Recursive descent with error recovery
   └────┬────┘
   ┌────▼────┐
-  │ Checker  │   Types, permissions, compliance, template/directive validation
+  │ Checker  │   Types, permissions, compliance, federation trust validation
   └────┬────┘
   ┌────▼────┐
   │  Build   │   Multi-target: Claude / OpenAI / CrewAI / Cursor / Gemini
   └────┬────┘
   ┌────▼────┐
-  │Dispatch  │   Tool execution, retry, compliance mediation
+  │Dispatch  │   Tool execution, retry, compliance mediation, federation
   └─────────┘
 ```
 
-The checker runs two passes: name collection, then validation. Permission violations, type mismatches, compliance role conflicts, and undefined references are all caught before execution. The dispatcher supports mock mode for development and real API dispatch for Claude, OpenAI, and Ollama.
+### Workspace Crates
+
+| Crate | Role |
+|-------|------|
+| `pact-core` | Compiler frontend: lexer, parser, checker, interpreter, formatter |
+| `pact-build` | Emit TOML/Markdown/Claude JSON, guardrails, agent cards |
+| `pact-dispatch` | API clients (Claude/OpenAI/Ollama), tool-use loop, mediation, federated dispatch |
+| `pact-cli` | CLI frontend (11 commands) |
+| `pact-lsp` | Language server (diagnostics, completion, hover) |
+| `pact-mcp` | Model Context Protocol server (stdio + SSE) |
+| `pact-mermaid` | Mermaid agentflow diagram conversion (bidirectional) |
+| `pact-wasm` | WebAssembly module (7 browser-safe exports) |
+| `pact-federation` | Federation registry client and trust resolution |
+| `pact-registry` | Package registry for sharing templates, directives, tools |
+
+The checker runs two passes: name collection, then validation. Permission violations, type mismatches, compliance role conflicts, federation trust boundary violations, and undefined references are all caught before execution. The dispatcher supports mock mode for development and real API dispatch for Claude, OpenAI, and Ollama.
 
 ## Editor Support
 
@@ -433,11 +535,13 @@ Configure the LSP path in settings if needed:
 - [x] Compliance declarations -- risk tiers, audit levels, SOD roles, regulatory frameworks
 - [x] Agent cards -- A2A discovery JSON
 - [x] MCP server -- stdio and SSE transports
-- [x] WASM module -- run PACT in the browser and embed in other tools
-- [x] Mermaid agentflow diagrams -- bidirectional PACT-to-Mermaid conversion
+- [x] WASM module -- 7 browser-safe exports (check, fmt, doc, agent cards, agentflow)
+- [x] Mermaid agentflow diagrams -- bidirectional conversion with grouping and skill rendering
 - [x] Package registry -- share and reuse templates, directives, tools
 - [x] Streaming responses -- real-time agent output
-- [x] Remote agent federation -- cross-network agent discovery and dispatch
+- [x] Remote agent federation -- cross-network discovery and dispatch with trust boundaries
+- [x] CI pipeline -- GitHub Actions with workspace tests, clippy, example validation, WASM build
+- [x] 783+ tests -- unit, integration, formatter roundtrip, federation, WASM
 
 ## License
 

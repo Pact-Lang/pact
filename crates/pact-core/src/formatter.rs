@@ -147,8 +147,15 @@ impl Formatter {
                 self.push_line("federation {");
                 self.indent();
                 for entry in &f.registries {
-                    self.push_line(&format!("\"{}\" trust: [{}]", entry.url,
-                        entry.trust.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>().join(", ")));
+                    self.push_indent();
+                    self.push(&format!("\"{}\" trust: [", entry.url));
+                    for (i, perm) in entry.trust.iter().enumerate() {
+                        if i > 0 {
+                            self.push(", ");
+                        }
+                        self.write_expr(perm);
+                    }
+                    self.push("]\n");
                 }
                 self.dedent();
                 self.push_line("}");
@@ -195,6 +202,10 @@ impl Formatter {
             self.push("model: ");
             self.write_expr(model);
             self.newline();
+        }
+
+        if let Some(endpoint) = &d.endpoint {
+            self.push_line(&format!("endpoint: \"{}\"", endpoint));
         }
 
         if let Some(prompt) = &d.prompt {
@@ -646,7 +657,10 @@ impl Formatter {
         match &expr.kind {
             ExprKind::IntLit(n) => self.push(&n.to_string()),
             ExprKind::FloatLit(f) => self.push(&format_float(*f)),
-            ExprKind::StringLit(s) => self.push(&format!("\"{}\"", s)),
+            ExprKind::StringLit(s) => {
+                let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+                self.push(&format!("\"{}\"", escaped));
+            }
             ExprKind::PromptLit(s) => self.push(&format!("<<{}>>", s)),
             ExprKind::BoolLit(b) => self.push(if *b { "true" } else { "false" }),
             ExprKind::Ident(name) => self.push(name),
@@ -1097,5 +1111,46 @@ type Tone = Formal | Casual | Friendly
         assert!(out.contains("approver: \"finance_lead\""));
         assert!(out.contains("executor: \"payment_agent\""));
         assert!(out.contains("auditor: \"compliance_team\""));
+    }
+
+    #[test]
+    fn format_all_examples_idempotent() {
+        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples");
+        let entries: Vec<_> = std::fs::read_dir(&examples_dir)
+            .expect("examples dir should exist")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "pact"))
+            .collect();
+        assert!(!entries.is_empty(), "no .pact examples found");
+
+        for entry in entries {
+            let path = entry.path();
+            let src = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            let fname = path.file_name().unwrap().to_string_lossy().to_string();
+            let first = roundtrip(&src);
+            let second = roundtrip(&first);
+            assert_eq!(
+                first, second,
+                "Formatter not idempotent for {}",
+                path.file_name().unwrap().to_string_lossy()
+            );
+        }
+    }
+
+    #[test]
+    fn format_federation_roundtrip() {
+        let src = r#"federation {
+    "https://agents.example.com" trust: [^llm.query, ^net.read]
+    "https://internal.corp.net" trust: [^data.read, ^data.write]
+}
+"#;
+        let out = roundtrip(src);
+        assert!(out.contains("federation {"));
+        assert!(out.contains("\"https://agents.example.com\" trust: [^llm.query, ^net.read]"));
+        assert!(out.contains("\"https://internal.corp.net\" trust: [^data.read, ^data.write]"));
+        let second = roundtrip(&out);
+        assert_eq!(out, second, "federation formatting not idempotent");
     }
 }

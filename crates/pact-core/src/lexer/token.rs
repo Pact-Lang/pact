@@ -219,6 +219,21 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    /// If this token is a contextual keyword that may also serve as an
+    /// identifier (e.g. in parameter or variable names), return the keyword string.
+    /// Only includes keywords safe to use in name positions — excludes statement-
+    /// starting keywords like `run`, `record`, `on`, etc.
+    pub fn as_contextual_ident(&self) -> Option<&'static str> {
+        match self {
+            Self::Endpoint => Some("endpoint"),
+            Self::Trust => Some("trust"),
+            Self::Handler => Some("handler"),
+            Self::Cache => Some("cache"),
+            Self::Strategy => Some("strategy"),
+            _ => None,
+        }
+    }
+
     /// Return a human-readable description of this token kind for diagnostics.
     pub fn describe(&self) -> &'static str {
         match self {

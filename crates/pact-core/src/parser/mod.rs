@@ -195,6 +195,31 @@ impl<'t> Parser<'t> {
         }
     }
 
+    /// Like `expect_ident` but also accepts contextual keywords that can
+    /// serve as user-defined names (e.g. `endpoint` as a parameter name).
+    pub(crate) fn expect_name(&mut self, context: &str) -> Result<String, ParseError> {
+        match self.peek_kind().clone() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(name)
+            }
+            ref tok if tok.as_contextual_ident().is_some() => {
+                let name = tok.as_contextual_ident().unwrap().to_string();
+                self.advance();
+                Ok(name)
+            }
+            _ => {
+                let span = self.current_span();
+                Err(ParseError::UnexpectedToken {
+                    expected: format!("{context} (identifier)"),
+                    found: self.peek_kind().describe().to_string(),
+                    span: (span.start..span.end).into(),
+                })
+            }
+        }
+    }
+
     /// Consume the current token if it matches, otherwise do nothing.
     pub(crate) fn eat(&mut self, kind: &TokenKind) -> bool {
         if self.check(kind) {

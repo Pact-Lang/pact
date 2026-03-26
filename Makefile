@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Gabriel Lars Sabadin
 # Licensed under the MIT License.
 
-.PHONY: build run test check clean fmt lint install help
+.PHONY: build run test check clean fmt lint install help wasm wasm-test
 
 # Default target
 help: ## Show this help message
@@ -61,4 +61,10 @@ clean: ## Remove build artifacts and generated output
 install: ## Install the pact binary to ~/.cargo/bin
 	cargo install --path crates/pact-cli
 
-all: fmt lint build test check-examples build-examples test-examples ## Run everything
+wasm: ## Build the WASM package
+	wasm-pack build crates/pact-wasm --target web --out-dir ../../pkg
+
+wasm-test: ## Run WASM native tests
+	cargo test -p pact-wasm
+
+all: fmt lint build test check-examples build-examples test-examples wasm ## Run everything

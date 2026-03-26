@@ -334,6 +334,7 @@ pub enum ContainerKind {
     Skill,
     Directive,
     TestCase,
+    Group,
 }
 
 /// A first-class type declaration in agentflow.
@@ -444,6 +445,9 @@ pub struct AgentFlowStep {
     pub tool: String,
     /// Argument variable names.
     pub args: Vec<String>,
+    /// Skill name (without $), if the tool belongs to a skill on this agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
 }
 
 /// A type alias (union type) declaration.

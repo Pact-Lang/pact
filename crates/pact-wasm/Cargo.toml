@@ -3,7 +3,7 @@ name = "pact-wasm"
 version = "0.1.0"
 edition = "2021"
 authors = ["Gabriel Lars Sabadin"]
-description = "WebAssembly bindings for PACT — convert between .pact and Mermaid agentflow"
+description = "WebAssembly bindings for PACT — check, format, build, and convert .pact programs"
 license = "MIT"
 repository = "https://github.com/pact-lang/pact"
 homepage = "https://github.com/pact-lang/pact"
@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pact-core = { path = "../pact-core" }
+pact-build = { path = "../pact-build" }
 pact-mermaid = { path = "../pact-mermaid" }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }

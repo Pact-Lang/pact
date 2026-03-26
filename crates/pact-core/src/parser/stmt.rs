@@ -358,7 +358,7 @@ impl<'t> Parser<'t> {
         let mut params = Vec::new();
         while !self.check(&TokenKind::RParen) && !self.check(&TokenKind::Eof) {
             let span = self.current_span();
-            let name = self.expect_ident("parameter name")?;
+            let name = self.expect_name("parameter name")?;
             let ty = if self.check(&TokenKind::ColonColon) {
                 self.advance();
                 Some(self.parse_type_expr()?)
@@ -614,7 +614,7 @@ impl<'t> Parser<'t> {
         let mut params = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             let span = self.current_span();
-            let name = self.expect_ident("parameter name")?;
+            let name = self.expect_name("parameter name")?;
             self.expect(&TokenKind::ColonColon)?;
             let ty = self.parse_type_expr()?;
             let param_span = span.merge(self.previous_span());
