@@ -82,7 +82,9 @@ impl AgentRegistry {
                 // Permission subset filter.
                 if let Some(ref required) = req.permissions {
                     let all_covered = card.permissions.iter().all(|perm| {
-                        required.iter().any(|r| perm == r || perm.starts_with(&format!("{r}.")))
+                        required
+                            .iter()
+                            .any(|r| perm == r || perm.starts_with(&format!("{r}.")))
                     });
                     if !all_covered {
                         return false;

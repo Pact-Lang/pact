@@ -79,7 +79,9 @@ impl OutputFormat {
             Self::Audio => "audio/mpeg",
             Self::Video => "video/mp4",
             Self::Code => "application/zip",
-            Self::Slides => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            Self::Slides => {
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            }
             Self::Excel => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         }
     }
@@ -192,19 +194,24 @@ pub fn infer_output_format(program: &Program, flow_name: &str) -> Option<OutputF
 pub fn infer_from_content(content: &str) -> OutputFormat {
     let trimmed = content.trim();
 
-    if trimmed.starts_with("<!DOCTYPE") || trimmed.starts_with("<html") || trimmed.starts_with("<HTML") {
+    if trimmed.starts_with("<!DOCTYPE")
+        || trimmed.starts_with("<html")
+        || trimmed.starts_with("<HTML")
+    {
         return OutputFormat::Html;
     }
     if trimmed.starts_with('<') && trimmed.ends_with('>') && trimmed.contains("<svg") {
         return OutputFormat::Svg;
     }
-    if trimmed.starts_with("<?xml") || (trimmed.starts_with('<') && trimmed.ends_with('>') && !trimmed.contains("<html")) {
+    if trimmed.starts_with("<?xml")
+        || (trimmed.starts_with('<') && trimmed.ends_with('>') && !trimmed.contains("<html"))
+    {
         return OutputFormat::Xml;
     }
-    if trimmed.starts_with('{') || trimmed.starts_with('[') {
-        if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
-            return OutputFormat::Json;
-        }
+    if (trimmed.starts_with('{') || trimmed.starts_with('['))
+        && serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
+    {
+        return OutputFormat::Json;
     }
     if trimmed.starts_with("---\n") || trimmed.contains("\n---\n") {
         return OutputFormat::Yaml;
@@ -212,17 +219,22 @@ pub fn infer_from_content(content: &str) -> OutputFormat {
     // SQL detection: common keywords at start of lines.
     if trimmed.lines().take(5).any(|l| {
         let up = l.trim().to_uppercase();
-        up.starts_with("SELECT ") || up.starts_with("CREATE ") || up.starts_with("INSERT ")
-            || up.starts_with("ALTER ") || up.starts_with("DROP ") || up.starts_with("BEGIN")
+        up.starts_with("SELECT ")
+            || up.starts_with("CREATE ")
+            || up.starts_with("INSERT ")
+            || up.starts_with("ALTER ")
+            || up.starts_with("DROP ")
+            || up.starts_with("BEGIN")
     }) {
         return OutputFormat::Sql;
     }
     if trimmed.contains("\n# ") || trimmed.starts_with("# ") || trimmed.contains("\n## ") {
         return OutputFormat::Markdown;
     }
-    if trimmed.lines().all(|line| {
-        line.contains(',') || line.is_empty()
-    }) && trimmed.lines().count() > 1
+    if trimmed
+        .lines()
+        .all(|line| line.contains(',') || line.is_empty())
+        && trimmed.lines().count() > 1
     {
         return OutputFormat::Csv;
     }
@@ -264,26 +276,82 @@ fn text_to_format(text: &str) -> Option<OutputFormat> {
     // Order matters: check more specific patterns first.
     let patterns: &[(&[&str], OutputFormat)] = &[
         // Media — check first to avoid false positives (e.g. "image" in "imagine")
-        (&["generate_image", "create_image", "dall-e", "dalle", "stable diffusion",
-          "midjourney", "image_gen", "text_to_image", "text-to-image", "render_image"], OutputFormat::Image),
-        (&["text_to_speech", "text-to-speech", "tts", "generate_audio", "create_audio",
-          "synthesize_voice", "podcast", "narrat"], OutputFormat::Audio),
-        (&["generate_video", "create_video", "text_to_video", "text-to-video",
-          "animate", "render_video"], OutputFormat::Video),
+        (
+            &[
+                "generate_image",
+                "create_image",
+                "dall-e",
+                "dalle",
+                "stable diffusion",
+                "midjourney",
+                "image_gen",
+                "text_to_image",
+                "text-to-image",
+                "render_image",
+            ],
+            OutputFormat::Image,
+        ),
+        (
+            &[
+                "text_to_speech",
+                "text-to-speech",
+                "tts",
+                "generate_audio",
+                "create_audio",
+                "synthesize_voice",
+                "podcast",
+                "narrat",
+            ],
+            OutputFormat::Audio,
+        ),
+        (
+            &[
+                "generate_video",
+                "create_video",
+                "text_to_video",
+                "text-to-video",
+                "animate",
+                "render_video",
+            ],
+            OutputFormat::Video,
+        ),
         // Office
-        (&["slide", "presentation", "pptx", "deck", "powerpoint"], OutputFormat::Slides),
+        (
+            &["slide", "presentation", "pptx", "deck", "powerpoint"],
+            OutputFormat::Slides,
+        ),
         (&["excel", "xlsx", "workbook"], OutputFormat::Excel),
         // Archive
-        (&["scaffold", "boilerplate", "project_gen", "code_gen", "generate_project",
-          "create_project", "zip_code", "source_code"], OutputFormat::Code),
+        (
+            &[
+                "scaffold",
+                "boilerplate",
+                "project_gen",
+                "code_gen",
+                "generate_project",
+                "create_project",
+                "zip_code",
+                "source_code",
+            ],
+            OutputFormat::Code,
+        ),
         // Text formats
-        (&["html", "webpage", "website", "web page", "web_page"], OutputFormat::Html),
+        (
+            &["html", "webpage", "website", "web page", "web_page"],
+            OutputFormat::Html,
+        ),
         (&["pdf", "portable document"], OutputFormat::Pdf),
         (&["svg", "vector graphic"], OutputFormat::Svg),
-        (&["csv", "comma-separated", "comma_separated"], OutputFormat::Csv),
+        (
+            &["csv", "comma-separated", "comma_separated"],
+            OutputFormat::Csv,
+        ),
         (&["yaml", "yml"], OutputFormat::Yaml),
         (&["xml"], OutputFormat::Xml),
-        (&["sql", "database script", "migration", "query"], OutputFormat::Sql),
+        (
+            &["sql", "database script", "migration", "query"],
+            OutputFormat::Sql,
+        ),
         (&["json"], OutputFormat::Json),
         (&["markdown", ".md"], OutputFormat::Markdown),
     ];
@@ -300,7 +368,7 @@ fn text_to_format(text: &str) -> Option<OutputFormat> {
 }
 
 /// Collect tool names referenced in a flow body (via `ToolRef` or `AgentDispatch`).
-fn collect_tool_refs<'a>(exprs: &'a [pact_core::ast::expr::Expr]) -> Vec<&'a str> {
+fn collect_tool_refs(exprs: &[pact_core::ast::expr::Expr]) -> Vec<&str> {
     let mut names = Vec::new();
     for expr in exprs {
         collect_tool_refs_expr(expr, &mut names);
@@ -308,10 +376,7 @@ fn collect_tool_refs<'a>(exprs: &'a [pact_core::ast::expr::Expr]) -> Vec<&'a str
     names
 }
 
-fn collect_tool_refs_expr<'a>(
-    expr: &'a pact_core::ast::expr::Expr,
-    names: &mut Vec<&'a str>,
-) {
+fn collect_tool_refs_expr<'a>(expr: &'a pact_core::ast::expr::Expr, names: &mut Vec<&'a str>) {
     match &expr.kind {
         ExprKind::ToolRef(name) => names.push(name),
         ExprKind::AgentDispatch { tool, args, .. } => {
@@ -356,7 +421,7 @@ fn collect_tool_refs_expr<'a>(
 }
 
 /// Collect agent names referenced in a flow body.
-fn collect_agent_refs<'a>(exprs: &'a [pact_core::ast::expr::Expr]) -> Vec<&'a str> {
+fn collect_agent_refs(exprs: &[pact_core::ast::expr::Expr]) -> Vec<&str> {
     let mut names = Vec::new();
     for expr in exprs {
         collect_agent_refs_expr(expr, &mut names);
@@ -364,13 +429,12 @@ fn collect_agent_refs<'a>(exprs: &'a [pact_core::ast::expr::Expr]) -> Vec<&'a st
     names
 }
 
-fn collect_agent_refs_expr<'a>(
-    expr: &'a pact_core::ast::expr::Expr,
-    names: &mut Vec<&'a str>,
-) {
+fn collect_agent_refs_expr<'a>(expr: &'a pact_core::ast::expr::Expr, names: &mut Vec<&'a str>) {
     match &expr.kind {
         ExprKind::AgentRef(name) => names.push(name),
-        ExprKind::AgentDispatch { agent, tool, args, .. } => {
+        ExprKind::AgentDispatch {
+            agent, tool, args, ..
+        } => {
             collect_agent_refs_expr(agent, names);
             collect_agent_refs_expr(tool, names);
             for arg in args {
@@ -603,7 +667,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "create_art"), Some(OutputFormat::Image));
+        assert_eq!(
+            infer_output_format(&program, "create_art"),
+            Some(OutputFormat::Image)
+        );
     }
 
     #[test]
@@ -625,7 +692,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "draw"), Some(OutputFormat::Image));
+        assert_eq!(
+            infer_output_format(&program, "draw"),
+            Some(OutputFormat::Image)
+        );
     }
 
     #[test]
@@ -647,7 +717,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "narrate"), Some(OutputFormat::Audio));
+        assert_eq!(
+            infer_output_format(&program, "narrate"),
+            Some(OutputFormat::Audio)
+        );
     }
 
     #[test]
@@ -669,7 +742,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "produce"), Some(OutputFormat::Video));
+        assert_eq!(
+            infer_output_format(&program, "produce"),
+            Some(OutputFormat::Video)
+        );
     }
 
     #[test]
@@ -691,7 +767,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "present"), Some(OutputFormat::Slides));
+        assert_eq!(
+            infer_output_format(&program, "present"),
+            Some(OutputFormat::Slides)
+        );
     }
 
     #[test]
@@ -713,7 +792,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "report"), Some(OutputFormat::Excel));
+        assert_eq!(
+            infer_output_format(&program, "report"),
+            Some(OutputFormat::Excel)
+        );
     }
 
     #[test]
@@ -735,7 +817,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "scaffold"), Some(OutputFormat::Code));
+        assert_eq!(
+            infer_output_format(&program, "scaffold"),
+            Some(OutputFormat::Code)
+        );
     }
 
     #[test]
@@ -757,7 +842,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "migrate"), Some(OutputFormat::Sql));
+        assert_eq!(
+            infer_output_format(&program, "migrate"),
+            Some(OutputFormat::Sql)
+        );
     }
 
     #[test]
@@ -795,7 +883,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "write_docs"), Some(OutputFormat::Markdown));
+        assert_eq!(
+            infer_output_format(&program, "write_docs"),
+            Some(OutputFormat::Markdown)
+        );
     }
 
     #[test]
@@ -817,7 +908,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "get_data"), Some(OutputFormat::Json));
+        assert_eq!(
+            infer_output_format(&program, "get_data"),
+            Some(OutputFormat::Json)
+        );
     }
 
     #[test]
@@ -839,7 +933,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "gen_config"), Some(OutputFormat::Yaml));
+        assert_eq!(
+            infer_output_format(&program, "gen_config"),
+            Some(OutputFormat::Yaml)
+        );
     }
 
     #[test]
@@ -861,7 +958,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "diagram"), Some(OutputFormat::Svg));
+        assert_eq!(
+            infer_output_format(&program, "diagram"),
+            Some(OutputFormat::Svg)
+        );
     }
 
     #[test]
@@ -883,7 +983,10 @@ mod tests {
             }
         "#;
         let program = parse(src);
-        assert_eq!(infer_output_format(&program, "export"), Some(OutputFormat::Xml));
+        assert_eq!(
+            infer_output_format(&program, "export"),
+            Some(OutputFormat::Xml)
+        );
     }
 
     #[test]
@@ -930,7 +1033,9 @@ mod tests {
     #[test]
     fn infer_content_svg() {
         assert_eq!(
-            infer_from_content("<svg xmlns=\"http://www.w3.org/2000/svg\"><circle r=\"50\"/></svg>"),
+            infer_from_content(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\"><circle r=\"50\"/></svg>"
+            ),
             OutputFormat::Svg,
         );
     }

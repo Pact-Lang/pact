@@ -69,20 +69,14 @@ impl FederationClient {
         card: &RemoteAgentCard,
     ) -> Result<RegisterResponse, FederationError> {
         let url = format!("{registry_url}/register");
-        let req = RegisterRequest {
-            card: card.clone(),
-        };
+        let req = RegisterRequest { card: card.clone() };
 
-        let resp = self
-            .http
-            .post(&url)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| FederationError::RegistryUnavailable {
+        let resp = self.http.post(&url).json(&req).send().await.map_err(|e| {
+            FederationError::RegistryUnavailable {
                 url: registry_url.to_string(),
                 message: e.to_string(),
-            })?;
+            }
+        })?;
 
         resp.json::<RegisterResponse>()
             .await

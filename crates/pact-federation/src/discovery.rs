@@ -52,15 +52,12 @@ impl DiscoveryClient {
                 url = format!("{url}?query={}", urlencoding::encode(q));
             }
 
-            let resp = self
-                .http
-                .get(&url)
-                .send()
-                .await
-                .map_err(|e| FederationError::RegistryUnavailable {
+            let resp = self.http.get(&url).send().await.map_err(|e| {
+                FederationError::RegistryUnavailable {
                     url: registry_url.clone(),
                     message: e.to_string(),
-                })?;
+                }
+            })?;
 
             if !resp.status().is_success() {
                 warn!(
@@ -75,9 +72,11 @@ impl DiscoveryClient {
             }
 
             let discover_resp: DiscoverResponse =
-                resp.json().await.map_err(|e| FederationError::InvalidResponse {
-                    message: e.to_string(),
-                })?;
+                resp.json()
+                    .await
+                    .map_err(|e| FederationError::InvalidResponse {
+                        message: e.to_string(),
+                    })?;
 
             for card in discover_resp.agents {
                 if self.validate_trust(&card, trusted_perms) {
@@ -120,15 +119,15 @@ impl DiscoveryClient {
     ) -> Result<HealthResponse, FederationError> {
         let url = format!("{registry_url}/health");
 
-        let resp = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| FederationError::RegistryUnavailable {
-                url: registry_url.into(),
-                message: e.to_string(),
-            })?;
+        let resp =
+            self.http
+                .get(&url)
+                .send()
+                .await
+                .map_err(|e| FederationError::RegistryUnavailable {
+                    url: registry_url.into(),
+                    message: e.to_string(),
+                })?;
 
         if !resp.status().is_success() {
             return Err(FederationError::RegistryUnavailable {

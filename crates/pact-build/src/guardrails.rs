@@ -37,9 +37,18 @@ const ALL_PERMISSION_CATEGORIES: &[(&str, &str)] = &[
     ("exec.run", "execute system commands"),
     ("email.send", "send emails"),
     ("pay.charge", "process payments"),
-    ("scan.passive", "perform passive reconnaissance (DNS, headers, certificates)"),
-    ("scan.active", "perform active scanning (port scans, HTTP fuzzing, crawling)"),
-    ("scan.exploit", "validate vulnerabilities with proof-of-concept exploitation"),
+    (
+        "scan.passive",
+        "perform passive reconnaissance (DNS, headers, certificates)",
+    ),
+    (
+        "scan.active",
+        "perform active scanning (port scans, HTTP fuzzing, crawling)",
+    ),
+    (
+        "scan.exploit",
+        "validate vulnerabilities with proof-of-concept exploitation",
+    ),
 ];
 
 /// Sensitive data patterns and their compliance implications.
@@ -174,7 +183,9 @@ pub fn generate_guardrails(agent: &AgentDecl, program: &Program) -> String {
     let mut domains = detect_compliance_domains(&tool_decls);
 
     // Also detect SecurityTesting from scan permissions
-    if granted.iter().any(|p| p.starts_with("scan.") || p == "scan")
+    if granted
+        .iter()
+        .any(|p| p.starts_with("scan.") || p == "scan")
         && !domains.contains(&ComplianceDomain::SecurityTesting)
     {
         domains.push(ComplianceDomain::SecurityTesting);
@@ -424,9 +435,13 @@ fn generate_compliance_section(domains: &[ComplianceDomain]) -> String {
                 md.push_str("- Do not store raw exploit payloads or stolen credentials beyond the current scan session.\n\n");
                 md.push_str("**Reporting:**\n");
                 md.push_str("- Document every finding with: vulnerability type, severity (CVSS or qualitative), affected component, reproduction steps, and remediation guidance.\n");
-                md.push_str("- Classify severity as: critical, high, medium, low, or informational.\n");
+                md.push_str(
+                    "- Classify severity as: critical, high, medium, low, or informational.\n",
+                );
                 md.push_str("- Include proof-of-concept evidence (HTTP request/response, screenshot description) but never include working exploit code in reports.\n");
-                md.push_str("- Prioritize findings by business impact, not just technical severity.\n\n");
+                md.push_str(
+                    "- Prioritize findings by business impact, not just technical severity.\n\n",
+                );
             }
         }
     }

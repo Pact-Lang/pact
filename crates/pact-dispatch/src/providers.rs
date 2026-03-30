@@ -146,7 +146,8 @@ impl ProviderRegistry {
             "scan.dns",
             ProviderInfo {
                 name: "DNS Enumeration",
-                description: "Enumerate DNS records (A, AAAA, MX, TXT, CNAME, NS) for a target domain",
+                description:
+                    "Enumerate DNS records (A, AAAA, MX, TXT, CNAME, NS) for a target domain",
                 required_permission: "scan.passive",
             },
         );
@@ -170,7 +171,8 @@ impl ProviderRegistry {
             "scan.technologies",
             ProviderInfo {
                 name: "Technology Fingerprint",
-                description: "Detect web technologies, frameworks, and server software from HTTP responses",
+                description:
+                    "Detect web technologies, frameworks, and server software from HTTP responses",
                 required_permission: "scan.passive",
             },
         );
@@ -514,9 +516,12 @@ fn execute_json_parse(params: &HashMap<String, String>) -> Result<String, Dispat
 // ── Security Scanning Providers ──────────────────────────────────
 
 async fn execute_scan_headers(params: &HashMap<String, String>) -> Result<String, DispatchError> {
-    let url = params.get("url").or_else(|| params.get("target")).ok_or_else(|| {
-        DispatchError::ExecutionError("scan.headers requires a 'url' parameter".into())
-    })?;
+    let url = params
+        .get("url")
+        .or_else(|| params.get("target"))
+        .ok_or_else(|| {
+            DispatchError::ExecutionError("scan.headers requires a 'url' parameter".into())
+        })?;
 
     debug!(url = url.as_str(), "scan.headers");
 
@@ -573,9 +578,7 @@ async fn execute_scan_headers(params: &HashMap<String, String>) -> Result<String
     if let Some(server) = response.headers().get("server") {
         result.insert(
             "server".into(),
-            serde_json::Value::String(
-                server.to_str().unwrap_or("(non-UTF8)").to_string(),
-            ),
+            serde_json::Value::String(server.to_str().unwrap_or("(non-UTF8)").to_string()),
         );
     }
 
@@ -584,9 +587,12 @@ async fn execute_scan_headers(params: &HashMap<String, String>) -> Result<String
 }
 
 async fn execute_scan_ssl(params: &HashMap<String, String>) -> Result<String, DispatchError> {
-    let domain = params.get("domain").or_else(|| params.get("target")).ok_or_else(|| {
-        DispatchError::ExecutionError("scan.ssl requires a 'domain' parameter".into())
-    })?;
+    let domain = params
+        .get("domain")
+        .or_else(|| params.get("target"))
+        .ok_or_else(|| {
+            DispatchError::ExecutionError("scan.ssl requires a 'domain' parameter".into())
+        })?;
 
     debug!(domain = domain.as_str(), "scan.ssl");
 
@@ -620,10 +626,7 @@ async fn execute_scan_ssl(params: &HashMap<String, String>) -> Result<String, Di
         }
         Err(e) => {
             result.insert("tls_connected".into(), serde_json::Value::Bool(false));
-            result.insert(
-                "error".into(),
-                serde_json::Value::String(format!("{e}")),
-            );
+            result.insert("error".into(), serde_json::Value::String(format!("{e}")));
         }
     }
 
@@ -657,9 +660,12 @@ async fn execute_scan_ssl(params: &HashMap<String, String>) -> Result<String, Di
 }
 
 async fn execute_scan_dns(params: &HashMap<String, String>) -> Result<String, DispatchError> {
-    let domain = params.get("domain").or_else(|| params.get("target")).ok_or_else(|| {
-        DispatchError::ExecutionError("scan.dns requires a 'domain' parameter".into())
-    })?;
+    let domain = params
+        .get("domain")
+        .or_else(|| params.get("target"))
+        .ok_or_else(|| {
+            DispatchError::ExecutionError("scan.dns requires a 'domain' parameter".into())
+        })?;
 
     debug!(domain = domain.as_str(), "scan.dns");
 
@@ -696,10 +702,7 @@ async fn execute_scan_dns(params: &HashMap<String, String>) -> Result<String, Di
                             .filter_map(|a| a.get("data").cloned())
                             .collect();
                         if !data.is_empty() {
-                            records.insert(
-                                (*rtype).to_string(),
-                                serde_json::Value::Array(data),
-                            );
+                            records.insert((*rtype).to_string(), serde_json::Value::Array(data));
                         }
                     }
                 }
@@ -712,9 +715,12 @@ async fn execute_scan_dns(params: &HashMap<String, String>) -> Result<String, Di
 }
 
 async fn execute_scan_ports(params: &HashMap<String, String>) -> Result<String, DispatchError> {
-    let host = params.get("host").or_else(|| params.get("target")).ok_or_else(|| {
-        DispatchError::ExecutionError("scan.ports requires a 'host' parameter".into())
-    })?;
+    let host = params
+        .get("host")
+        .or_else(|| params.get("target"))
+        .ok_or_else(|| {
+            DispatchError::ExecutionError("scan.ports requires a 'host' parameter".into())
+        })?;
 
     debug!(host = host.as_str(), "scan.ports");
 
@@ -785,19 +791,19 @@ async fn execute_scan_ports(params: &HashMap<String, String>) -> Result<String, 
         "ports_scanned".into(),
         serde_json::Value::Number(common_ports.len().into()),
     );
-    result.insert(
-        "open".into(),
-        serde_json::Value::Array(open_ports),
-    );
+    result.insert("open".into(), serde_json::Value::Array(open_ports));
 
     serde_json::to_string_pretty(&result)
         .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
 }
 
 async fn execute_scan_http(params: &HashMap<String, String>) -> Result<String, DispatchError> {
-    let url = params.get("url").or_else(|| params.get("target")).ok_or_else(|| {
-        DispatchError::ExecutionError("scan.http requires a 'url' parameter".into())
-    })?;
+    let url = params
+        .get("url")
+        .or_else(|| params.get("target"))
+        .ok_or_else(|| {
+            DispatchError::ExecutionError("scan.http requires a 'url' parameter".into())
+        })?;
 
     debug!(url = url.as_str(), "scan.http");
 
@@ -842,8 +848,13 @@ async fn execute_scan_http(params: &HashMap<String, String>) -> Result<String, D
 
     // Probe common sensitive paths
     let sensitive_paths = [
-        "/.env", "/.git/config", "/wp-admin/", "/admin/",
-        "/robots.txt", "/.well-known/security.txt", "/sitemap.xml",
+        "/.env",
+        "/.git/config",
+        "/wp-admin/",
+        "/admin/",
+        "/robots.txt",
+        "/.well-known/security.txt",
+        "/sitemap.xml",
     ];
 
     let base = url.trim_end_matches('/');
@@ -853,7 +864,10 @@ async fn execute_scan_http(params: &HashMap<String, String>) -> Result<String, D
             if path_status == 200 {
                 let severity = if *path == "/.env" || *path == "/.git/config" {
                     "high"
-                } else if *path == "/robots.txt" || *path == "/.well-known/security.txt" || *path == "/sitemap.xml" {
+                } else if *path == "/robots.txt"
+                    || *path == "/.well-known/security.txt"
+                    || *path == "/sitemap.xml"
+                {
                     "informational"
                 } else {
                     "medium"
@@ -882,9 +896,12 @@ async fn execute_scan_http(params: &HashMap<String, String>) -> Result<String, D
 async fn execute_scan_technologies(
     params: &HashMap<String, String>,
 ) -> Result<String, DispatchError> {
-    let url = params.get("url").or_else(|| params.get("target")).ok_or_else(|| {
-        DispatchError::ExecutionError("scan.technologies requires a 'url' parameter".into())
-    })?;
+    let url = params
+        .get("url")
+        .or_else(|| params.get("target"))
+        .ok_or_else(|| {
+            DispatchError::ExecutionError("scan.technologies requires a 'url' parameter".into())
+        })?;
 
     debug!(url = url.as_str(), "scan.technologies");
 

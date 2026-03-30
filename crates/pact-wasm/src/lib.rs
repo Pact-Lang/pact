@@ -143,7 +143,8 @@ pub fn pact_agent_cards(source: &str) -> Result<String, JsError> {
     let map: serde_json::Map<String, serde_json::Value> = cards
         .into_iter()
         .map(|(name, json_str)| {
-            let val = serde_json::from_str(&json_str).unwrap_or(serde_json::Value::String(json_str));
+            let val =
+                serde_json::from_str(&json_str).unwrap_or(serde_json::Value::String(json_str));
             (name, val)
         })
         .collect();

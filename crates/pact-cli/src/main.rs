@@ -351,8 +351,12 @@ fn main() -> Result<()> {
         Command::Add { package } => cmd_add(&package),
         Command::Search { query } => cmd_search(&query),
         Command::Federation { action } => match action {
-            FederationAction::Discover { file, query } => cmd_federation_discover(&file, query.as_deref()),
-            FederationAction::Register { file, registry } => cmd_federation_register(&file, &registry),
+            FederationAction::Discover { file, query } => {
+                cmd_federation_discover(&file, query.as_deref())
+            }
+            FederationAction::Register { file, registry } => {
+                cmd_federation_register(&file, &registry)
+            }
             FederationAction::Health { file } => cmd_federation_health(&file),
         },
     }
@@ -2171,7 +2175,9 @@ fn playground_eval(
                 }
                 DeclKind::Lesson(l) => println!("Defined lesson \"{}\"", l.name),
                 DeclKind::Compliance(c) => println!("Defined compliance \"{}\"", c.name),
-                DeclKind::Federation(f) => println!("Defined federation with {} registries", f.registries.len()),
+                DeclKind::Federation(f) => {
+                    println!("Defined federation with {} registries", f.registries.len())
+                }
             }
         }
 
@@ -2318,10 +2324,7 @@ fn cmd_install() -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "Installing {} dependencies...",
-        manifest.dependencies.len()
-    );
+    println!("Installing {} dependencies...", manifest.dependencies.len());
 
     let rt = tokio::runtime::Runtime::new()
         .into_diagnostic()
@@ -2382,11 +2385,7 @@ fn cmd_add(package: &str) -> Result<()> {
     };
 
     // Extract short name from repo path
-    let name = github
-        .split('/')
-        .next_back()
-        .unwrap_or(&github)
-        .to_string();
+    let name = github.split('/').next_back().unwrap_or(&github).to_string();
 
     if manifest.dependencies.contains_key(&name) {
         println!("Dependency '{}' already exists, updating...", name);
@@ -2534,7 +2533,14 @@ fn cmd_federation_discover(file: &str, query: Option<&str>) -> Result<()> {
 
         for (url, trust_perms) in &registries {
             println!("Registry: {}", url);
-            println!("  Trust: [{}]", trust_perms.iter().map(|p| format!("^{p}")).collect::<Vec<_>>().join(", "));
+            println!(
+                "  Trust: [{}]",
+                trust_perms
+                    .iter()
+                    .map(|p| format!("^{p}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
 
             let mut discover_url = format!("{url}/discover");
             if let Some(q) = query {
@@ -2550,13 +2556,24 @@ fn cmd_federation_discover(file: &str, query: Option<&str>) -> Result<()> {
                                     println!("  No agents found.");
                                 } else {
                                     for agent in agents {
-                                        let name = agent.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                                        let desc = agent.get("description").and_then(|d| d.as_str()).unwrap_or("");
-                                        let endpoint = agent.get("endpoint").and_then(|e| e.as_str()).unwrap_or("?");
+                                        let name = agent
+                                            .get("name")
+                                            .and_then(|n| n.as_str())
+                                            .unwrap_or("?");
+                                        let desc = agent
+                                            .get("description")
+                                            .and_then(|d| d.as_str())
+                                            .unwrap_or("");
+                                        let endpoint = agent
+                                            .get("endpoint")
+                                            .and_then(|e| e.as_str())
+                                            .unwrap_or("?");
                                         let perms: Vec<&str> = agent
                                             .get("permissions")
                                             .and_then(|p| p.as_array())
-                                            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+                                            .map(|arr| {
+                                                arr.iter().filter_map(|v| v.as_str()).collect()
+                                            })
                                             .unwrap_or_default();
 
                                         // Check trust boundary.
@@ -2567,7 +2584,8 @@ fn cmd_federation_discover(file: &str, query: Option<&str>) -> Result<()> {
                                             })
                                         });
 
-                                        let trust_marker = if within_trust { "OK" } else { "UNTRUSTED" };
+                                        let trust_marker =
+                                            if within_trust { "OK" } else { "UNTRUSTED" };
                                         println!("  @{name} [{trust_marker}]");
                                         if !desc.is_empty() {
                                             println!("    {desc}");
@@ -2576,7 +2594,11 @@ fn cmd_federation_discover(file: &str, query: Option<&str>) -> Result<()> {
                                         if !perms.is_empty() {
                                             println!(
                                                 "    permits: [{}]",
-                                                perms.iter().map(|p| format!("^{p}")).collect::<Vec<_>>().join(", ")
+                                                perms
+                                                    .iter()
+                                                    .map(|p| format!("^{p}"))
+                                                    .collect::<Vec<_>>()
+                                                    .join(", ")
                                             );
                                         }
                                     }

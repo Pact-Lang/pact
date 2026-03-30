@@ -1569,7 +1569,9 @@ mod tests {
         "#;
         let errors = check_src(src);
         assert!(
-            errors.iter().any(|e| matches!(e, CheckError::EmptyFederationTrust { .. })),
+            errors
+                .iter()
+                .any(|e| matches!(e, CheckError::EmptyFederationTrust { .. })),
             "expected EmptyFederationTrust error, got: {:?}",
             errors
         );

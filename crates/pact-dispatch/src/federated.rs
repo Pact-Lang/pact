@@ -92,9 +92,9 @@ impl FederatedDispatcher {
         let all_trusted: Vec<&String> = self.trust_map.values().flatten().collect();
 
         for perm in agent_perms {
-            let is_trusted = all_trusted.iter().any(|trusted| {
-                *trusted == perm || perm.starts_with(&format!("{trusted}."))
-            });
+            let is_trusted = all_trusted
+                .iter()
+                .any(|trusted| *trusted == perm || perm.starts_with(&format!("{trusted}.")));
             if !is_trusted {
                 return Err(format!(
                     "remote agent '@{agent_name}' requires permission '^{perm}' \
@@ -219,7 +219,11 @@ impl FederatedDispatcher {
         })?;
 
         for obs in &response.observations {
-            info!(agent = agent_name, observation = obs.as_str(), "remote observation");
+            info!(
+                agent = agent_name,
+                observation = obs.as_str(),
+                "remote observation"
+            );
         }
 
         Ok(Self::json_to_value(&response.result))
@@ -249,13 +253,8 @@ impl Dispatcher for FederatedDispatcher {
             self.validate_trust(agent_name, &perms)?;
 
             // Dispatch remotely.
-            self.runtime.block_on(self.dispatch_remote(
-                endpoint,
-                agent_name,
-                tool_name,
-                args,
-                perms,
-            ))
+            self.runtime
+                .block_on(self.dispatch_remote(endpoint, agent_name, tool_name, args, perms))
         } else {
             // No endpoint — delegate to local fallback dispatcher.
             debug!(
@@ -282,9 +281,7 @@ mod tests {
             permits: perms
                 .iter()
                 .map(|p| Expr {
-                    kind: ExprKind::PermissionRef(
-                        p.split('.').map(String::from).collect(),
-                    ),
+                    kind: ExprKind::PermissionRef(p.split('.').map(String::from).collect()),
                     span: Span::new(SourceId(0), 0, 0),
                 })
                 .collect(),
@@ -308,7 +305,13 @@ mod tests {
         let program = Program { decls: vec![] };
 
         let result = dispatcher
-            .dispatch("local_bot", "greet", &[Value::String("hi".into())], &agent, &program)
+            .dispatch(
+                "local_bot",
+                "greet",
+                &[Value::String("hi".into())],
+                &agent,
+                &program,
+            )
             .unwrap();
 
         assert!(matches!(result, Value::ToolResult(_)));
@@ -386,7 +389,11 @@ mod tests {
         let fallback = Box::new(MockDispatcher);
         let dispatcher = FederatedDispatcher::new(trust_map, fallback).unwrap();
 
-        let agent = make_agent("remote_bot", Some("https://remote.example.com"), &["llm.query"]);
+        let agent = make_agent(
+            "remote_bot",
+            Some("https://remote.example.com"),
+            &["llm.query"],
+        );
         let program = Program { decls: vec![] };
 
         let result = dispatcher.dispatch(

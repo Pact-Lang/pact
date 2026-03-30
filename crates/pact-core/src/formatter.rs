@@ -1115,8 +1115,7 @@ type Tone = Formal | Casual | Friendly
 
     #[test]
     fn format_all_examples_idempotent() {
-        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../examples");
+        let examples_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
         let entries: Vec<_> = std::fs::read_dir(&examples_dir)
             .expect("examples dir should exist")
             .filter_map(|e| e.ok())
@@ -1131,7 +1130,8 @@ type Tone = Formal | Casual | Friendly
             let first = roundtrip(&src);
             let second = roundtrip(&first);
             assert_eq!(
-                first, second,
+                first,
+                second,
                 "Formatter not idempotent for {}",
                 path.file_name().unwrap().to_string_lossy()
             );

@@ -247,8 +247,7 @@ fn federated_dispatcher_local_fallback() {
         vec!["data.read".to_string(), "data.write".to_string()],
     );
 
-    let dispatcher =
-        FederatedDispatcher::new(trust_map, Box::new(MockDispatcher)).unwrap();
+    let dispatcher = FederatedDispatcher::new(trust_map, Box::new(MockDispatcher)).unwrap();
 
     // Dispatch to local agent (no endpoint) — should use fallback.
     let researcher = program
@@ -283,8 +282,7 @@ fn federated_dispatcher_trust_validation_pass() {
         vec!["data.read".to_string(), "data.write".to_string()],
     );
 
-    let dispatcher =
-        FederatedDispatcher::new(trust_map, Box::new(MockDispatcher)).unwrap();
+    let dispatcher = FederatedDispatcher::new(trust_map, Box::new(MockDispatcher)).unwrap();
 
     // Dispatch to remote agent — trust boundary covers data.read + data.write.
     // This will fail at the HTTP level (no server), but trust validation should pass.
@@ -321,8 +319,7 @@ fn federated_dispatcher_trust_validation_fail() {
     // Empty trust map — no permissions are trusted.
     let trust_map = HashMap::new();
 
-    let dispatcher =
-        FederatedDispatcher::new(trust_map, Box::new(MockDispatcher)).unwrap();
+    let dispatcher = FederatedDispatcher::new(trust_map, Box::new(MockDispatcher)).unwrap();
 
     let archivist = program
         .decls
@@ -360,7 +357,10 @@ fn federation_example_file_passes_check() {
         .expect("federation.pact should exist");
     let program = parse_program(&src);
     let errors = Checker::new().check(&program);
-    assert!(errors.is_empty(), "federation.pact has checker errors: {errors:?}");
+    assert!(
+        errors.is_empty(),
+        "federation.pact has checker errors: {errors:?}"
+    );
 
     // Verify key declarations are present.
     let has_federation = program

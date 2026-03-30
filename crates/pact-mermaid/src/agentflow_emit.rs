@@ -466,7 +466,11 @@ fn extract_arg_names(args: &[pact_core::ast::expr::Expr]) -> Vec<String> {
 }
 
 /// Find which skill (if any) a tool belongs to on a given agent.
-fn find_skill_for_tool(graph: &AgentFlowGraph, agent_name: &str, tool_name: &str) -> Option<String> {
+fn find_skill_for_tool(
+    graph: &AgentFlowGraph,
+    agent_name: &str,
+    tool_name: &str,
+) -> Option<String> {
     let tool_ref = format!("#{}", tool_name);
     graph
         .agents
@@ -703,19 +707,14 @@ fn emit_agentflow_text(graph: &AgentFlowGraph, program: &Program) -> String {
         out.push_str("group permissions[\" \"]\n");
 
         // Collect parent node IDs — nodes that have children (outgoing delegation).
-        let parent_ids: std::collections::HashSet<&str> = permit_edges
-            .iter()
-            .map(|e| e.from.as_str())
-            .collect();
+        let parent_ids: std::collections::HashSet<&str> =
+            permit_edges.iter().map(|e| e.from.as_str()).collect();
 
         // Emit permission category parent nodes as hexagons.
         let mut emitted_parents = std::collections::HashSet::new();
         for &parent_id in &parent_ids {
             if emitted_parents.insert(parent_id) {
-                out.push_str(&format!(
-                    "  {}{{{{{}}}}}\n",
-                    parent_id, parent_id
-                ));
+                out.push_str(&format!("  {}{{{{{}}}}}\n", parent_id, parent_id));
             }
         }
 
@@ -2170,10 +2169,7 @@ flow find(query :: String) -> String {
         let text = pact_to_agentflow(&program);
 
         // Should have group containers instead of ~~~ edges.
-        assert!(
-            text.contains("group apa"),
-            "Expected group apa container"
-        );
+        assert!(text.contains("group apa"), "Expected group apa container");
         assert!(
             text.contains("group permissions"),
             "Expected group permissions container"
