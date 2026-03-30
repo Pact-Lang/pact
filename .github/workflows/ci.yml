@@ -18,7 +18,7 @@ jobs:
         rust: [stable]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust ${{ matrix.rust }}
         uses: dtolnay/rust-toolchain@stable
@@ -27,7 +27,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache cargo registry and target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -70,7 +70,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Cache cargo registry and target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
