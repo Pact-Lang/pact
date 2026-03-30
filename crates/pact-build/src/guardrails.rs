@@ -37,6 +37,9 @@ const ALL_PERMISSION_CATEGORIES: &[(&str, &str)] = &[
     ("exec.run", "execute system commands"),
     ("email.send", "send emails"),
     ("pay.charge", "process payments"),
+    ("scan.passive", "perform passive reconnaissance (DNS, headers, certificates)"),
+    ("scan.active", "perform active scanning (port scans, HTTP fuzzing, crawling)"),
+    ("scan.exploit", "validate vulnerabilities with proof-of-concept exploitation"),
 ];
 
 /// Sensitive data patterns and their compliance implications.
@@ -59,6 +62,8 @@ enum ComplianceDomain {
     Health,
     /// Authentication — triggers credential safety guardrails.
     Authentication,
+    /// Security testing — triggers scope limitation, authorized targets, and reporting guardrails.
+    SecurityTesting,
 }
 
 const SENSITIVE_PATTERNS: &[SensitivePattern] = &[
@@ -131,6 +136,25 @@ const SENSITIVE_PATTERNS: &[SensitivePattern] = &[
         ],
         domain: ComplianceDomain::Authentication,
     },
+    SensitivePattern {
+        keywords: &[
+            "vulnerability",
+            "exploit",
+            "pentest",
+            "scan_target",
+            "target_url",
+            "target_host",
+            "attack",
+            "payload",
+            "injection",
+            "fuzzing",
+            "port_scan",
+            "cve",
+            "finding",
+            "severity",
+        ],
+        domain: ComplianceDomain::SecurityTesting,
+    },
 ];
 
 /// Generate all automatic guardrail sections for an agent's prompt.
@@ -147,7 +171,14 @@ pub fn generate_guardrails(agent: &AgentDecl, program: &Program) -> String {
 
     let granted = collect_permissions(agent);
     let tool_decls = collect_agent_tools(agent, program);
-    let domains = detect_compliance_domains(&tool_decls);
+    let mut domains = detect_compliance_domains(&tool_decls);
+
+    // Also detect SecurityTesting from scan permissions
+    if granted.iter().any(|p| p.starts_with("scan.") || p == "scan")
+        && !domains.contains(&ComplianceDomain::SecurityTesting)
+    {
+        domains.push(ComplianceDomain::SecurityTesting);
+    }
 
     // Always inject security hardening
     md.push_str(&generate_security_section());
@@ -376,6 +407,26 @@ fn generate_compliance_section(domains: &[ComplianceDomain]) -> String {
                 md.push_str("- Never include credentials in error messages or debugging output.\n");
                 md.push_str("- If credentials are invalid, use generic error messages (do not reveal whether the username or password was wrong).\n");
                 md.push_str("- Treat all authentication data as highly sensitive.\n\n");
+            }
+            ComplianceDomain::SecurityTesting => {
+                md.push_str("### Security Testing (Authorized Scanning)\n\n");
+                md.push_str("**Scope limitation:**\n");
+                md.push_str("- ONLY scan targets explicitly provided in the flow parameters or configuration. Never discover and scan adjacent systems.\n");
+                md.push_str("- ONLY test vulnerability classes specified in the engagement scope. Do not expand to unrelated attack surfaces.\n");
+                md.push_str("- Immediately stop scanning if you detect the target is out of scope or belongs to a third party.\n\n");
+                md.push_str("**Authorization:**\n");
+                md.push_str("- Assume all scanning requires explicit authorization. If no authorization context is provided, refuse to scan.\n");
+                md.push_str("- Do not attempt social engineering, phishing, or attacks against people — only test technical systems.\n");
+                md.push_str("- Do not perform denial-of-service testing unless the `scan.exploit` permission is granted AND the scope explicitly allows it.\n\n");
+                md.push_str("**Data handling:**\n");
+                md.push_str("- Never exfiltrate data from target systems. Only read enough to confirm a vulnerability exists.\n");
+                md.push_str("- Mask or redact sensitive data found during scanning (credentials, PII, API keys) in reports.\n");
+                md.push_str("- Do not store raw exploit payloads or stolen credentials beyond the current scan session.\n\n");
+                md.push_str("**Reporting:**\n");
+                md.push_str("- Document every finding with: vulnerability type, severity (CVSS or qualitative), affected component, reproduction steps, and remediation guidance.\n");
+                md.push_str("- Classify severity as: critical, high, medium, low, or informational.\n");
+                md.push_str("- Include proof-of-concept evidence (HTTP request/response, screenshot description) but never include working exploit code in reports.\n");
+                md.push_str("- Prioritize findings by business impact, not just technical severity.\n\n");
             }
         }
     }
@@ -866,6 +917,60 @@ mod tests {
             assert!(guardrails.contains("Output verification"));
             assert!(guardrails.contains("Error over ambiguity"));
             assert!(guardrails.contains("No workarounds"));
+        }
+    }
+
+    #[test]
+    fn security_testing_compliance_from_permissions() {
+        let src = r#"
+            tool #port_scan {
+                description: <<Scan ports on target host.>>
+                requires: [^scan.active]
+                params { host :: String }
+                returns :: String
+            }
+            agent @scanner {
+                permits: [^scan.active, ^scan.passive, ^llm.query]
+                tools: [#port_scan]
+            }
+        "#;
+        let program = parse_program(src);
+        if let DeclKind::Agent(agent) = &program.decls[1].kind {
+            let guardrails = generate_guardrails(agent, &program);
+            assert!(
+                guardrails.contains("Security Testing (Authorized Scanning)"),
+                "should detect SecurityTesting from scan permissions"
+            );
+            assert!(guardrails.contains("Scope limitation"));
+            assert!(guardrails.contains("ONLY scan targets explicitly provided"));
+            assert!(guardrails.contains("Authorization"));
+            assert!(guardrails.contains("Data handling"));
+            assert!(guardrails.contains("Reporting"));
+            assert!(guardrails.contains("severity"));
+        }
+    }
+
+    #[test]
+    fn security_testing_compliance_from_keywords() {
+        let src = r#"
+            tool #check_vuln {
+                description: <<Check target for known vulnerabilities.>>
+                requires: [^net.read]
+                params { target_url :: String, cve :: String }
+                returns :: String
+            }
+            agent @checker {
+                permits: [^net.read, ^llm.query]
+                tools: [#check_vuln]
+            }
+        "#;
+        let program = parse_program(src);
+        if let DeclKind::Agent(agent) = &program.decls[1].kind {
+            let guardrails = generate_guardrails(agent, &program);
+            assert!(
+                guardrails.contains("Security Testing (Authorized Scanning)"),
+                "should detect SecurityTesting from vulnerability/cve keywords"
+            );
         }
     }
 

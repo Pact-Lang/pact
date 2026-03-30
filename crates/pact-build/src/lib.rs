@@ -80,6 +80,8 @@ pub mod emit_toml;
 pub mod guardrails;
 /// MCP server recommendation engine.
 pub mod mcp_recommend;
+/// Output format inference from program AST.
+pub mod output_format;
 
 use config::BuildConfig;
 use pact_core::ast::stmt::{DeclKind, Program};

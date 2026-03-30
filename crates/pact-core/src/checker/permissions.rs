@@ -26,6 +26,14 @@ pub fn tool_permission_registry() -> HashMap<&'static str, Vec<&'static str>> {
     map.insert("draft_report", vec!["llm.query"]);
     map.insert("file_read", vec!["fs.read"]);
     map.insert("file_write", vec!["fs.read", "fs.write"]);
+    // Security scanning tools
+    map.insert("scan_headers", vec!["scan.passive"]);
+    map.insert("scan_ssl", vec!["scan.passive"]);
+    map.insert("scan_dns", vec!["scan.passive"]);
+    map.insert("scan_technologies", vec!["scan.passive"]);
+    map.insert("scan_ports", vec!["scan.active"]);
+    map.insert("scan_http", vec!["scan.active"]);
+    map.insert("exploit_validate", vec!["scan.exploit"]);
     map
 }
 

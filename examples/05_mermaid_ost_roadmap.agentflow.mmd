@@ -191,8 +191,8 @@ end
 other@{algorithm: elk.box}
 group permissions[" "]
   db{{db}}
-  llm{{llm}}
   net{{net}}
+  llm{{llm}}
   llm -->> llm_query
   llm -->> llm_embed
   net -->> net_read
@@ -375,6 +375,7 @@ test_1_assertion@{ shape: double-circle }
 test_1@{
     view: collapsed
     assert: "full roadmap analysis produces report"
+    refs: "strategist"
 }
 
 testCase test_2["issue classification returns enriched data"]
@@ -384,6 +385,7 @@ test_2_assertion@{ shape: double-circle }
 test_2@{
     view: collapsed
     assert: "issue classification returns enriched data"
+    refs: "issue_collector"
 }
 
 testCase test_3["persona profiling covers all personas"]
@@ -393,11 +395,8 @@ test_3_assertion@{ shape: double-circle }
 test_3@{
     view: collapsed
     assert: "persona profiling covers all personas"
+    refs: "persona_analyst"
 }
-
-  test_1 -.-> strategist
-  test_2 -.-> issue_collector
-  test_3 -.-> persona_analyst
 end
 tests@{algorithm: elk.box}
 

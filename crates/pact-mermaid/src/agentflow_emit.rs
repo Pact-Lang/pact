@@ -754,18 +754,23 @@ fn emit_agentflow_text(graph: &AgentFlowGraph, program: &Program) -> String {
         .collect();
 
     if !graph.tests.is_empty() {
+        // Build a map of test_id → referenced targets for metadata injection.
+        let test_refs: std::collections::HashMap<&str, Vec<&str>> = {
+            let mut map: std::collections::HashMap<&str, Vec<&str>> =
+                std::collections::HashMap::new();
+            for edge in &test_edges {
+                map.entry(edge.from.as_str())
+                    .or_default()
+                    .push(edge.to.as_str());
+            }
+            map
+        };
+
         out.push_str("group tests[\" \"]\n");
 
         for test in &graph.tests {
-            emit_test_case(&mut out, test);
-        }
-
-        // Test reference edges inside the group.
-        if !test_edges.is_empty() {
-            out.push('\n');
-            for edge in &test_edges {
-                out.push_str(&format!("  {} -.-> {}\n", edge.from, edge.to));
-            }
+            let refs = test_refs.get(test.id.as_str()).map(|v| v.as_slice());
+            emit_test_case(&mut out, test, refs);
         }
 
         out.push_str("end\n");
@@ -1404,7 +1409,10 @@ fn emit_lesson_node(out: &mut String, lesson: &AgentFlowLessonNode) {
 }
 
 /// Emit a test case as a testCase container.
-fn emit_test_case(out: &mut String, test: &AgentFlowTestCase) {
+///
+/// If `refs` is provided, the referenced agent/node IDs are emitted as metadata
+/// instead of cross-group edges (which break ELK layout across scope boundaries).
+fn emit_test_case(out: &mut String, test: &AgentFlowTestCase, refs: Option<&[&str]>) {
     let assertion_id = format!("{}_assertion", test.id);
     // Use the test description as label for the testCase container.
     let label = if let Some(desc) = &test.metadata.assert_expr {
@@ -1424,6 +1432,9 @@ fn emit_test_case(out: &mut String, test: &AgentFlowTestCase) {
     }
     if let Some(expects) = &test.metadata.expects {
         meta_parts.push(format!("expects: \"{}\"", expects.replace('"', "\\\"")));
+    }
+    if let Some(ref_targets) = refs {
+        meta_parts.push(format!("refs: \"{}\"", ref_targets.join(", ")));
     }
     if !meta_parts.is_empty() {
         out.push_str(&format!("{}@{{\n", test.id));

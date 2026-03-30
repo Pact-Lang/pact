@@ -1128,7 +1128,6 @@ type Tone = Formal | Casual | Friendly
             let path = entry.path();
             let src = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-            let fname = path.file_name().unwrap().to_string_lossy().to_string();
             let first = roundtrip(&src);
             let second = roundtrip(&first);
             assert_eq!(

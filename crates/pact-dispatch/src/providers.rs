@@ -125,6 +125,56 @@ impl ProviderRegistry {
             },
         );
 
+        // Security scanning providers
+        providers.insert(
+            "scan.headers",
+            ProviderInfo {
+                name: "HTTP Security Headers",
+                description: "Analyze HTTP security headers (HSTS, CSP, X-Frame-Options, etc.) of a target URL",
+                required_permission: "scan.passive",
+            },
+        );
+        providers.insert(
+            "scan.ssl",
+            ProviderInfo {
+                name: "SSL/TLS Analysis",
+                description: "Analyze SSL/TLS certificate and configuration of a target domain",
+                required_permission: "scan.passive",
+            },
+        );
+        providers.insert(
+            "scan.dns",
+            ProviderInfo {
+                name: "DNS Enumeration",
+                description: "Enumerate DNS records (A, AAAA, MX, TXT, CNAME, NS) for a target domain",
+                required_permission: "scan.passive",
+            },
+        );
+        providers.insert(
+            "scan.ports",
+            ProviderInfo {
+                name: "Port Scanner",
+                description: "Scan common TCP ports on a target host to identify open services",
+                required_permission: "scan.active",
+            },
+        );
+        providers.insert(
+            "scan.http",
+            ProviderInfo {
+                name: "HTTP Probe",
+                description: "Probe HTTP endpoints for common misconfigurations, default pages, and server info disclosure",
+                required_permission: "scan.active",
+            },
+        );
+        providers.insert(
+            "scan.technologies",
+            ProviderInfo {
+                name: "Technology Fingerprint",
+                description: "Detect web technologies, frameworks, and server software from HTTP responses",
+                required_permission: "scan.passive",
+            },
+        );
+
         Self { providers }
     }
 
@@ -175,6 +225,12 @@ pub async fn execute_provider(
         "fs.glob" => execute_fs_glob(params),
         "time.now" => execute_time_now(params),
         "json.parse" => execute_json_parse(params),
+        "scan.headers" => execute_scan_headers(params).await,
+        "scan.ssl" => execute_scan_ssl(params).await,
+        "scan.dns" => execute_scan_dns(params).await,
+        "scan.ports" => execute_scan_ports(params).await,
+        "scan.http" => execute_scan_http(params).await,
+        "scan.technologies" => execute_scan_technologies(params).await,
         _ => Err(DispatchError::ExecutionError(format!(
             "unknown provider capability: '{}'. Use ProviderRegistry::list() to see available providers.",
             capability
@@ -455,6 +511,460 @@ fn execute_json_parse(params: &HashMap<String, String>) -> Result<String, Dispat
         .map_err(|e| DispatchError::ExecutionError(format!("JSON serialization failed: {e}")))
 }
 
+// ── Security Scanning Providers ──────────────────────────────────
+
+async fn execute_scan_headers(params: &HashMap<String, String>) -> Result<String, DispatchError> {
+    let url = params.get("url").or_else(|| params.get("target")).ok_or_else(|| {
+        DispatchError::ExecutionError("scan.headers requires a 'url' parameter".into())
+    })?;
+
+    debug!(url = url.as_str(), "scan.headers");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| DispatchError::ExecutionError(format!("scan.headers failed: {e}")))?;
+
+    let security_headers = [
+        "strict-transport-security",
+        "content-security-policy",
+        "x-content-type-options",
+        "x-frame-options",
+        "x-xss-protection",
+        "referrer-policy",
+        "permissions-policy",
+        "cross-origin-opener-policy",
+        "cross-origin-resource-policy",
+        "cross-origin-embedder-policy",
+    ];
+
+    let mut result = serde_json::Map::new();
+    result.insert("url".into(), serde_json::Value::String(url.clone()));
+    result.insert(
+        "status".into(),
+        serde_json::Value::Number(response.status().as_u16().into()),
+    );
+
+    let mut headers_found = serde_json::Map::new();
+    let mut headers_missing = Vec::new();
+
+    for &header in &security_headers {
+        if let Some(val) = response.headers().get(header) {
+            headers_found.insert(
+                header.into(),
+                serde_json::Value::String(val.to_str().unwrap_or("(non-UTF8)").to_string()),
+            );
+        } else {
+            headers_missing.push(serde_json::Value::String(header.into()));
+        }
+    }
+
+    result.insert("present".into(), serde_json::Value::Object(headers_found));
+    result.insert("missing".into(), serde_json::Value::Array(headers_missing));
+
+    // Include server header if present (info disclosure check)
+    if let Some(server) = response.headers().get("server") {
+        result.insert(
+            "server".into(),
+            serde_json::Value::String(
+                server.to_str().unwrap_or("(non-UTF8)").to_string(),
+            ),
+        );
+    }
+
+    serde_json::to_string_pretty(&result)
+        .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
+}
+
+async fn execute_scan_ssl(params: &HashMap<String, String>) -> Result<String, DispatchError> {
+    let domain = params.get("domain").or_else(|| params.get("target")).ok_or_else(|| {
+        DispatchError::ExecutionError("scan.ssl requires a 'domain' parameter".into())
+    })?;
+
+    debug!(domain = domain.as_str(), "scan.ssl");
+
+    // Connect via HTTPS and inspect the TLS state
+    let url = if domain.starts_with("https://") {
+        domain.clone()
+    } else {
+        format!("https://{domain}")
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
+
+    let response = client.get(&url).send().await;
+
+    let mut result = serde_json::Map::new();
+    result.insert("domain".into(), serde_json::Value::String(domain.clone()));
+
+    match response {
+        Ok(resp) => {
+            result.insert("tls_connected".into(), serde_json::Value::Bool(true));
+            result.insert(
+                "status".into(),
+                serde_json::Value::Number(resp.status().as_u16().into()),
+            );
+            // Check for HSTS
+            let has_hsts = resp.headers().get("strict-transport-security").is_some();
+            result.insert("hsts".into(), serde_json::Value::Bool(has_hsts));
+        }
+        Err(e) => {
+            result.insert("tls_connected".into(), serde_json::Value::Bool(false));
+            result.insert(
+                "error".into(),
+                serde_json::Value::String(format!("{e}")),
+            );
+        }
+    }
+
+    // Test if HTTP redirects to HTTPS
+    let http_url = if domain.starts_with("http://") {
+        domain.clone()
+    } else {
+        format!("http://{domain}")
+    };
+
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
+
+    if let Ok(http_resp) = http_client.get(&http_url).send().await {
+        let redirects_to_https = http_resp
+            .headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|loc| loc.starts_with("https://"));
+        result.insert(
+            "http_redirects_to_https".into(),
+            serde_json::Value::Bool(redirects_to_https),
+        );
+    }
+
+    serde_json::to_string_pretty(&result)
+        .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
+}
+
+async fn execute_scan_dns(params: &HashMap<String, String>) -> Result<String, DispatchError> {
+    let domain = params.get("domain").or_else(|| params.get("target")).ok_or_else(|| {
+        DispatchError::ExecutionError("scan.dns requires a 'domain' parameter".into())
+    })?;
+
+    debug!(domain = domain.as_str(), "scan.dns");
+
+    // Use DNS-over-HTTPS (DoH) via Cloudflare for portable resolution
+    let record_types = ["A", "AAAA", "MX", "TXT", "CNAME", "NS"];
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
+
+    let mut records = serde_json::Map::new();
+    records.insert("domain".into(), serde_json::Value::String(domain.clone()));
+
+    for rtype in &record_types {
+        let url = format!(
+            "https://cloudflare-dns.com/dns-query?name={}&type={}",
+            urlencoding::encode(domain),
+            rtype
+        );
+
+        if let Ok(resp) = client
+            .get(&url)
+            .header("Accept", "application/dns-json")
+            .send()
+            .await
+        {
+            if let Ok(body) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(answers) = json.get("Answer") {
+                        let data: Vec<serde_json::Value> = answers
+                            .as_array()
+                            .unwrap_or(&vec![])
+                            .iter()
+                            .filter_map(|a| a.get("data").cloned())
+                            .collect();
+                        if !data.is_empty() {
+                            records.insert(
+                                (*rtype).to_string(),
+                                serde_json::Value::Array(data),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&records)
+        .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
+}
+
+async fn execute_scan_ports(params: &HashMap<String, String>) -> Result<String, DispatchError> {
+    let host = params.get("host").or_else(|| params.get("target")).ok_or_else(|| {
+        DispatchError::ExecutionError("scan.ports requires a 'host' parameter".into())
+    })?;
+
+    debug!(host = host.as_str(), "scan.ports");
+
+    // Scan common ports via TCP connect
+    let common_ports: &[(u16, &str)] = &[
+        (21, "ftp"),
+        (22, "ssh"),
+        (23, "telnet"),
+        (25, "smtp"),
+        (53, "dns"),
+        (80, "http"),
+        (110, "pop3"),
+        (143, "imap"),
+        (443, "https"),
+        (445, "smb"),
+        (993, "imaps"),
+        (995, "pop3s"),
+        (3306, "mysql"),
+        (3389, "rdp"),
+        (5432, "postgresql"),
+        (6379, "redis"),
+        (8080, "http-alt"),
+        (8443, "https-alt"),
+        (27017, "mongodb"),
+    ];
+
+    let mut open_ports = Vec::new();
+    let timeout = std::time::Duration::from_millis(
+        params
+            .get("timeout_ms")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1500),
+    );
+
+    for &(port, service) in common_ports {
+        let addr = format!("{}:{}", host, port);
+        let connected = if let Ok(addr) = addr.parse::<std::net::SocketAddr>() {
+            tokio::time::timeout(timeout, tokio::net::TcpStream::connect(addr))
+                .await
+                .is_ok_and(|r| r.is_ok())
+        } else if let Ok(addrs) = tokio::net::lookup_host(&addr).await {
+            let mut found = false;
+            for resolved in addrs.take(1) {
+                if tokio::time::timeout(timeout, tokio::net::TcpStream::connect(resolved))
+                    .await
+                    .is_ok_and(|r| r.is_ok())
+                {
+                    found = true;
+                }
+            }
+            found
+        } else {
+            false
+        };
+
+        if connected {
+            let mut entry = serde_json::Map::new();
+            entry.insert("port".into(), serde_json::Value::Number(port.into()));
+            entry.insert("service".into(), serde_json::Value::String(service.into()));
+            entry.insert("state".into(), serde_json::Value::String("open".into()));
+            open_ports.push(serde_json::Value::Object(entry));
+        }
+    }
+
+    let mut result = serde_json::Map::new();
+    result.insert("host".into(), serde_json::Value::String(host.clone()));
+    result.insert(
+        "ports_scanned".into(),
+        serde_json::Value::Number(common_ports.len().into()),
+    );
+    result.insert(
+        "open".into(),
+        serde_json::Value::Array(open_ports),
+    );
+
+    serde_json::to_string_pretty(&result)
+        .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
+}
+
+async fn execute_scan_http(params: &HashMap<String, String>) -> Result<String, DispatchError> {
+    let url = params.get("url").or_else(|| params.get("target")).ok_or_else(|| {
+        DispatchError::ExecutionError("scan.http requires a 'url' parameter".into())
+    })?;
+
+    debug!(url = url.as_str(), "scan.http");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
+
+    let mut findings = Vec::new();
+
+    // Check main page
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| DispatchError::ExecutionError(format!("scan.http failed: {e}")))?;
+
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+
+    // Check for server info disclosure
+    if let Some(server) = headers.get("server") {
+        let s = server.to_str().unwrap_or("");
+        if s.contains('/') {
+            findings.push(serde_json::json!({
+                "type": "info_disclosure",
+                "severity": "low",
+                "detail": format!("Server header reveals version: {s}")
+            }));
+        }
+    }
+
+    // Check for X-Powered-By disclosure
+    if let Some(powered) = headers.get("x-powered-by") {
+        findings.push(serde_json::json!({
+            "type": "info_disclosure",
+            "severity": "low",
+            "detail": format!("X-Powered-By header reveals technology: {}", powered.to_str().unwrap_or(""))
+        }));
+    }
+
+    // Probe common sensitive paths
+    let sensitive_paths = [
+        "/.env", "/.git/config", "/wp-admin/", "/admin/",
+        "/robots.txt", "/.well-known/security.txt", "/sitemap.xml",
+    ];
+
+    let base = url.trim_end_matches('/');
+    for path in &sensitive_paths {
+        if let Ok(resp) = client.get(format!("{base}{path}")).send().await {
+            let path_status = resp.status().as_u16();
+            if path_status == 200 {
+                let severity = if *path == "/.env" || *path == "/.git/config" {
+                    "high"
+                } else if *path == "/robots.txt" || *path == "/.well-known/security.txt" || *path == "/sitemap.xml" {
+                    "informational"
+                } else {
+                    "medium"
+                };
+                findings.push(serde_json::json!({
+                    "type": "exposed_path",
+                    "severity": severity,
+                    "path": path,
+                    "status": path_status
+                }));
+            }
+        }
+    }
+
+    let result = serde_json::json!({
+        "url": url,
+        "status": status,
+        "findings": findings,
+        "findings_count": findings.len()
+    });
+
+    serde_json::to_string_pretty(&result)
+        .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
+}
+
+async fn execute_scan_technologies(
+    params: &HashMap<String, String>,
+) -> Result<String, DispatchError> {
+    let url = params.get("url").or_else(|| params.get("target")).ok_or_else(|| {
+        DispatchError::ExecutionError("scan.technologies requires a 'url' parameter".into())
+    })?;
+
+    debug!(url = url.as_str(), "scan.technologies");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| DispatchError::ExecutionError(format!("HTTP client error: {e}")))?;
+
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| DispatchError::ExecutionError(format!("scan.technologies failed: {e}")))?;
+
+    let headers = response.headers().clone();
+    let body = response.text().await.unwrap_or_default();
+
+    let mut technologies = Vec::new();
+
+    // Detect from headers
+    if let Some(server) = headers.get("server") {
+        technologies.push(serde_json::json!({
+            "name": server.to_str().unwrap_or("unknown"),
+            "source": "server-header"
+        }));
+    }
+    if let Some(powered) = headers.get("x-powered-by") {
+        technologies.push(serde_json::json!({
+            "name": powered.to_str().unwrap_or("unknown"),
+            "source": "x-powered-by"
+        }));
+    }
+    if headers.get("x-drupal-cache").is_some() || headers.get("x-drupal-dynamic-cache").is_some() {
+        technologies.push(serde_json::json!({"name": "Drupal", "source": "header"}));
+    }
+
+    // Detect from HTML body patterns
+    let body_lower = body.to_lowercase();
+    let patterns: &[(&str, &str)] = &[
+        ("wp-content/", "WordPress"),
+        ("next/static", "Next.js"),
+        ("__nuxt", "Nuxt.js"),
+        ("_next/data", "Next.js"),
+        ("react", "React"),
+        ("vue.js", "Vue.js"),
+        ("angular", "Angular"),
+        ("jquery", "jQuery"),
+        ("bootstrap", "Bootstrap"),
+        ("tailwindcss", "Tailwind CSS"),
+        ("cloudflare", "Cloudflare"),
+        ("shopify", "Shopify"),
+        ("squarespace", "Squarespace"),
+        ("wix.com", "Wix"),
+    ];
+
+    for &(pattern, name) in patterns {
+        if body_lower.contains(pattern)
+            && !technologies.iter().any(|t| {
+                t.get("name")
+                    .and_then(|n| n.as_str())
+                    .is_some_and(|n| n == name)
+            })
+        {
+            technologies.push(serde_json::json!({
+                "name": name,
+                "source": "html-pattern"
+            }));
+        }
+    }
+
+    let result = serde_json::json!({
+        "url": url,
+        "technologies": technologies,
+        "count": technologies.len()
+    });
+
+    serde_json::to_string_pretty(&result)
+        .map_err(|e| DispatchError::ExecutionError(format!("JSON error: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,10 +1010,43 @@ mod tests {
     }
 
     #[test]
+    fn registry_has_scan_providers() {
+        let reg = ProviderRegistry::new();
+        assert!(reg.exists("scan.headers"));
+        assert!(reg.exists("scan.ssl"));
+        assert!(reg.exists("scan.dns"));
+        assert!(reg.exists("scan.ports"));
+        assert!(reg.exists("scan.http"));
+        assert!(reg.exists("scan.technologies"));
+    }
+
+    #[test]
+    fn registry_scan_namespace() {
+        let reg = ProviderRegistry::new();
+        let scan = reg.list_namespace("scan");
+        assert_eq!(scan.len(), 6);
+        assert!(scan.contains(&"scan.headers"));
+        assert!(scan.contains(&"scan.ports"));
+    }
+
+    #[test]
+    fn scan_providers_have_correct_permissions() {
+        let reg = ProviderRegistry::new();
+        assert_eq!(
+            reg.get("scan.headers").unwrap().required_permission,
+            "scan.passive"
+        );
+        assert_eq!(
+            reg.get("scan.ports").unwrap().required_permission,
+            "scan.active"
+        );
+    }
+
+    #[test]
     fn registry_list_all() {
         let reg = ProviderRegistry::new();
         let all = reg.list();
-        assert!(all.len() >= 10);
+        assert!(all.len() >= 16);
     }
 
     #[test]

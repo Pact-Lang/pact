@@ -637,7 +637,7 @@ impl<'t> Parser<'t> {
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             let span = self.current_span();
-            let field_name = self.expect_ident("field name")?;
+            let field_name = self.expect_name("field name")?;
             self.expect(&TokenKind::ColonColon)?;
             let ty = self.parse_type_expr()?;
             let field_span = span.merge(self.previous_span());
@@ -1237,7 +1237,7 @@ impl<'t> Parser<'t> {
                 });
             } else {
                 // FIELD_NAME :: Type [* count] [<<description>>]
-                let field_name = self.expect_ident("field name")?;
+                let field_name = self.expect_name("field name")?;
                 self.expect(&TokenKind::ColonColon)?;
                 let ty = self.parse_type_expr()?;
 

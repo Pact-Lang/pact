@@ -230,6 +230,13 @@ impl TokenKind {
             Self::Handler => Some("handler"),
             Self::Cache => Some("cache"),
             Self::Strategy => Some("strategy"),
+            Self::Description => Some("description"),
+            Self::Source => Some("source"),
+            Self::Validate => Some("validate"),
+            Self::Model => Some("model"),
+            Self::Retry => Some("retry"),
+            Self::Output => Some("output"),
+            Self::Section => Some("section"),
             _ => None,
         }
     }
