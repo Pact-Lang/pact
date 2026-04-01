@@ -1222,7 +1222,12 @@ fn parse_edge_target(right: &str) -> (String, Option<String>) {
 
 /// Extract the bare node ID from a possibly-labeled node reference like `id["label"]`.
 fn extract_node_id(s: &str) -> String {
-    let s = s.trim();
+    // Strip any trailing @{...} metadata block first.
+    let s = if let Some(at_pos) = s.find("@{") {
+        s[..at_pos].trim()
+    } else {
+        s.trim()
+    };
     if let Some(pos) = s.find(['[', '(', '{']) {
         s[..pos].trim().to_string()
     } else {
@@ -1433,12 +1438,6 @@ fn parse_tool_metadata(raw: &str) -> Result<ToolMetadata, MermaidError> {
                 _ => {}
             }
         }
-    }
-
-    if meta.description.is_empty() {
-        return Err(MermaidError::MalformedMetadata(
-            "tool metadata requires a 'description' field".to_string(),
-        ));
     }
 
     Ok(meta)
