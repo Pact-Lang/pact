@@ -142,25 +142,6 @@ enum Command {
         file: String,
     },
 
-    /// Convert a Mermaid diagram to a .pact file.
-    FromMermaid {
-        /// Path to the .mmd file.
-        file: String,
-
-        /// Output .pact file path (default: prints to stdout).
-        #[arg(long, short)]
-        output: Option<String>,
-    },
-
-    /// Convert a .pact file to a Mermaid diagram.
-    ToMermaid {
-        /// Path to the .pact file.
-        file: String,
-
-        /// Output .mmd file path (default: prints to stdout).
-        #[arg(long, short)]
-        output: Option<String>,
-    },
 
     /// Interactive REPL for experimenting with PACT.
     Playground {
@@ -338,8 +319,6 @@ fn main() -> Result<()> {
             output.as_deref(),
         ),
         Command::Test { file } => cmd_test(&file),
-        Command::FromMermaid { file, output } => cmd_from_mermaid(&file, output.as_deref()),
-        Command::ToMermaid { file, output } => cmd_to_mermaid(&file, output.as_deref()),
         Command::Playground { load } => cmd_playground(load.as_deref()),
         Command::List { what, file } => cmd_list(&what, file.as_deref()),
         Command::Fmt { file, write } => cmd_fmt(&file, write),
@@ -1510,45 +1489,6 @@ fn cmd_list_declarations(path: &str) -> Result<()> {
         + tests.len()
         + skills.len();
     println!("Total: {total} declaration(s)");
-
-    Ok(())
-}
-
-/// `pact test <file>` — run all test declarations.
-/// `pact from-mermaid <file> [-o output.pact]` — convert Mermaid to PACT.
-fn cmd_from_mermaid(path: &str, output: Option<&str>) -> Result<()> {
-    let source = fs::read_to_string(path)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("failed to read '{path}'"))?;
-
-    let pact_source = pact_mermaid::diagram_to_pact(&source).map_err(|e| miette::miette!("{e}"))?;
-
-    if let Some(out_path) = output {
-        fs::write(out_path, &pact_source)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to write '{out_path}'"))?;
-        println!("Converted '{}' -> '{}'", path, out_path);
-    } else {
-        println!("{pact_source}");
-    }
-
-    Ok(())
-}
-
-/// `pact to-mermaid <file> [-o output.mmd]` — convert PACT to Mermaid.
-fn cmd_to_mermaid(path: &str, output: Option<&str>) -> Result<()> {
-    let (program, _sm) = load_and_check(path)?;
-
-    let mermaid_source = pact_mermaid::pact_to_agentflow_text(&program);
-
-    if let Some(out_path) = output {
-        fs::write(out_path, &mermaid_source)
-            .into_diagnostic()
-            .wrap_err_with(|| format!("failed to write '{out_path}'"))?;
-        println!("Converted '{}' -> '{}'", path, out_path);
-    } else {
-        println!("{mermaid_source}");
-    }
 
     Ok(())
 }

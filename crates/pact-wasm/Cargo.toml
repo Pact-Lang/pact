@@ -7,7 +7,7 @@ description = "WebAssembly bindings for PACT — check, format, build, and conve
 license = "MIT"
 repository = "https://github.com/pact-lang/pact"
 homepage = "https://github.com/pact-lang/pact"
-keywords = ["ai", "agents", "language", "wasm", "mermaid"]
+keywords = ["ai", "agents", "language", "wasm", "llm"]
 categories = ["wasm", "development-tools"]
 readme = "../../README.md"
 
@@ -17,7 +17,6 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 pact-core = { path = "../pact-core" }
 pact-build = { path = "../pact-build" }
-pact-mermaid = { path = "../pact-mermaid" }
 wasm-bindgen = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

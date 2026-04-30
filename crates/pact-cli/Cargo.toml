@@ -19,7 +19,6 @@ path = "src/main.rs"
 pact-core = { path = "../pact-core" }
 pact-build = { path = "../pact-build" }
 pact-dispatch = { path = "../pact-dispatch" }
-pact-mermaid = { path = "../pact-mermaid" }
 clap = { version = "4", features = ["derive"] }
 miette = { version = "7", features = ["fancy"] }
 tokio = { version = "1", features = ["rt-multi-thread"] }

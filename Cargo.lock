@@ -1628,6 +1628,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pact-connectors"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64",
+ "chrono",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
 name = "pact-core"
 version = "0.1.0"
 dependencies = [
@@ -1685,7 +1702,6 @@ dependencies = [
  "pact-build",
  "pact-core",
  "pact-dispatch",
- "pact-mermaid",
  "pact-registry",
  "reqwest",
  "rustyline",
@@ -1714,18 +1730,6 @@ name = "pact-mcp"
 version = "0.1.0"
 dependencies = [
  "pact-build",
- "pact-core",
- "pact-mermaid",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "pact-mermaid"
-version = "0.1.0"
-dependencies = [
- "miette",
  "pact-core",
  "serde",
  "serde_json",
@@ -1757,7 +1761,6 @@ version = "0.1.0"
 dependencies = [
  "pact-build",
  "pact-core",
- "pact-mermaid",
  "serde",
  "serde_json",
  "wasm-bindgen",
