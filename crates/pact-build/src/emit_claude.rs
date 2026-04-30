@@ -153,6 +153,18 @@ pub fn tool_to_claude_with_program(tool: &ToolDecl, program: Option<&Program>) -
         required.push(json!(param.name));
     }
 
+    // If the tool has no explicit params but is backed by a connector,
+    // inject the known parameter schema for that connector operation.
+    if properties.is_empty() {
+        if let Some(handler) = &tool.handler {
+            if let Some(op) = handler.strip_prefix("connector ") {
+                let (props, reqs) = connector_operation_schema(op);
+                properties = props;
+                required = reqs;
+            }
+        }
+    }
+
     let input_schema = json!({
         "type": "object",
         "properties": properties,
@@ -164,6 +176,191 @@ pub fn tool_to_claude_with_program(tool: &ToolDecl, program: Option<&Program>) -
         description,
         input_schema,
     }
+}
+
+/// Return the JSON Schema properties and required list for a connector operation.
+///
+/// This provides the LLM with the parameter schema it needs to call
+/// connector-backed tools correctly. Parameters that are always resolved
+/// from connector credentials (like `owner`/`repo` for GitHub) are omitted
+/// so the LLM only sees what it actually needs to provide.
+fn connector_operation_schema(
+    operation: &str,
+) -> (serde_json::Map<String, JsonValue>, Vec<JsonValue>) {
+    let mut properties = serde_json::Map::new();
+    let mut required = Vec::new();
+
+    match operation {
+        // ── GitHub ──────────────────────────────────────────────
+        "github.push_file" => {
+            properties.insert("path".into(), json!({"type": "string", "description": "File path in the repository (e.g. \"web/index.html\")"}));
+            properties.insert("content".into(), json!({"type": "string", "description": "File content to write"}));
+            properties.insert("message".into(), json!({"type": "string", "description": "Commit message (defaults to \"Update via PACT flow\")"}));
+            properties.insert("branch".into(), json!({"type": "string", "description": "Target branch (defaults to \"main\")"}));
+            required.push(json!("path"));
+            required.push(json!("content"));
+        }
+        "github.create_pr" => {
+            properties.insert("title".into(), json!({"type": "string", "description": "Pull request title"}));
+            properties.insert("body".into(), json!({"type": "string", "description": "Pull request description (optional)"}));
+            properties.insert("base".into(), json!({"type": "string", "description": "Base branch to merge into (defaults to \"main\")"}));
+            properties.insert("head".into(), json!({"type": "string", "description": "Branch name (auto-generated if files is provided)"}));
+            properties.insert("files".into(), json!({"type": "string", "description": "JSON object mapping file paths to content. When provided, automatically creates branch, pushes files, and opens PR. Example: {\"web/index.html\": \"<html>...</html>\", \"web/style.css\": \"body{}\"}"}));
+            required.push(json!("title"));
+            required.push(json!("files"));
+        }
+        "github.create_issue" => {
+            properties.insert("title".into(), json!({"type": "string", "description": "Issue title"}));
+            properties.insert("body".into(), json!({"type": "string", "description": "Issue body text (optional)"}));
+            properties.insert("labels".into(), json!({"type": "string", "description": "Comma-separated label names (optional)"}));
+            required.push(json!("title"));
+        }
+        "github.read_file" => {
+            properties.insert("path".into(), json!({"type": "string", "description": "File path in the repository"}));
+            properties.insert("branch".into(), json!({"type": "string", "description": "Branch name (defaults to \"main\")"}));
+            required.push(json!("path"));
+        }
+        "github.list_repos" => {
+            // owner comes from credentials
+        }
+        "github.list_issues" => {
+            properties.insert("state".into(), json!({"type": "string", "description": "Filter by state: open, closed, or all (defaults to \"open\")"}));
+            properties.insert("labels".into(), json!({"type": "string", "description": "Comma-separated label names to filter by"}));
+            properties.insert("since".into(), json!({"type": "string", "description": "ISO 8601 timestamp to filter issues updated after"}));
+        }
+        "github.list_pulls" => {
+            properties.insert("state".into(), json!({"type": "string", "description": "Filter by state: open, closed, or all (defaults to \"open\")"}));
+        }
+        "github.get_issue_comments" => {
+            properties.insert("issue_number".into(), json!({"type": "string", "description": "Issue number"}));
+            required.push(json!("issue_number"));
+        }
+        "github.get_pull_comments" => {
+            properties.insert("pull_number".into(), json!({"type": "string", "description": "Pull request number"}));
+            required.push(json!("pull_number"));
+        }
+        // ── Mermaid Chart ──────────────────────────────────────
+        "mermaid.list_projects" => {
+            // No params needed
+        }
+        "mermaid.list_documents" => {
+            properties.insert("project_id".into(), json!({"type": "string", "description": "Project ID (auto-detected if omitted)"}));
+        }
+        "mermaid.get_document" => {
+            properties.insert("document_id".into(), json!({"type": "string", "description": "Document/diagram ID"}));
+            required.push(json!("document_id"));
+        }
+        "mermaid.create_document" => {
+            properties.insert("code".into(), json!({"type": "string", "description": "Mermaid diagram code (e.g. \"graph TD\\n    A --> B\")"}));
+            properties.insert("title".into(), json!({"type": "string", "description": "Document title (defaults to \"Untitled\")"}));
+            properties.insert("project_id".into(), json!({"type": "string", "description": "Project ID (auto-detected if omitted)"}));
+            required.push(json!("code"));
+        }
+        "mermaid.update_document" => {
+            properties.insert("document_id".into(), json!({"type": "string", "description": "Document ID to update"}));
+            properties.insert("code".into(), json!({"type": "string", "description": "Updated Mermaid diagram code"}));
+            properties.insert("title".into(), json!({"type": "string", "description": "Updated title (optional)"}));
+            properties.insert("project_id".into(), json!({"type": "string", "description": "Project ID (auto-detected if omitted)"}));
+            required.push(json!("document_id"));
+            required.push(json!("code"));
+        }
+        // ── Slack ──────────────────────────────────────────────
+        "slack.post_message" => {
+            properties.insert("channel".into(), json!({"type": "string", "description": "Channel ID or name to post to"}));
+            properties.insert("text".into(), json!({"type": "string", "description": "Message text"}));
+            required.push(json!("text"));
+        }
+        "slack.upload_file" => {
+            properties.insert("channel".into(), json!({"type": "string", "description": "Channel ID or name"}));
+            properties.insert("content".into(), json!({"type": "string", "description": "File content"}));
+            properties.insert("filename".into(), json!({"type": "string", "description": "File name"}));
+            required.push(json!("content"));
+            required.push(json!("filename"));
+        }
+        "slack.add_reaction" => {
+            properties.insert("channel".into(), json!({"type": "string", "description": "Channel ID"}));
+            properties.insert("timestamp".into(), json!({"type": "string", "description": "Message timestamp"}));
+            properties.insert("name".into(), json!({"type": "string", "description": "Emoji name (without colons)"}));
+            required.push(json!("channel"));
+            required.push(json!("timestamp"));
+            required.push(json!("name"));
+        }
+        // ── Figma ──────────────────────────────────────────────
+        "figma.get_file" => {
+            properties.insert("file_key".into(), json!({"type": "string", "description": "Figma file key"}));
+            required.push(json!("file_key"));
+        }
+        "figma.export_node" => {
+            properties.insert("file_key".into(), json!({"type": "string", "description": "Figma file key"}));
+            properties.insert("node_id".into(), json!({"type": "string", "description": "Node ID to export"}));
+            properties.insert("format".into(), json!({"type": "string", "description": "Export format: png, svg, jpg, or pdf (defaults to \"png\")"}));
+            required.push(json!("file_key"));
+            required.push(json!("node_id"));
+        }
+        "figma.get_components" => {
+            properties.insert("file_key".into(), json!({"type": "string", "description": "Figma file key"}));
+            required.push(json!("file_key"));
+        }
+        "figma.get_styles" => {
+            properties.insert("file_key".into(), json!({"type": "string", "description": "Figma file key"}));
+            required.push(json!("file_key"));
+        }
+        // ── Resend ─────────────────────────────────────────────
+        "resend.send_email" => {
+            properties.insert("to".into(), json!({"type": "string", "description": "Recipient email address"}));
+            properties.insert("subject".into(), json!({"type": "string", "description": "Email subject line"}));
+            properties.insert("html".into(), json!({"type": "string", "description": "Email body as HTML"}));
+            required.push(json!("to"));
+            required.push(json!("subject"));
+            required.push(json!("html"));
+        }
+        "resend.send_email_with_attachment" => {
+            properties.insert("to".into(), json!({"type": "string", "description": "Recipient email address"}));
+            properties.insert("subject".into(), json!({"type": "string", "description": "Email subject line"}));
+            properties.insert("html".into(), json!({"type": "string", "description": "Email body as HTML"}));
+            properties.insert("filename".into(), json!({"type": "string", "description": "Attachment filename"}));
+            properties.insert("content".into(), json!({"type": "string", "description": "Base64-encoded attachment content"}));
+            required.push(json!("to"));
+            required.push(json!("subject"));
+            required.push(json!("html"));
+            required.push(json!("filename"));
+            required.push(json!("content"));
+        }
+        // ── Google Drive ───────────────────────────────────────
+        "gdrive.upload" => {
+            properties.insert("name".into(), json!({"type": "string", "description": "File name"}));
+            properties.insert("content".into(), json!({"type": "string", "description": "File content"}));
+            properties.insert("mime_type".into(), json!({"type": "string", "description": "MIME type (e.g. \"text/html\")"}));
+            properties.insert("folder_id".into(), json!({"type": "string", "description": "Parent folder ID (uses default if omitted)"}));
+            required.push(json!("name"));
+            required.push(json!("content"));
+        }
+        "gdrive.create_folder" => {
+            properties.insert("name".into(), json!({"type": "string", "description": "Folder name"}));
+            properties.insert("parent_id".into(), json!({"type": "string", "description": "Parent folder ID (optional)"}));
+            required.push(json!("name"));
+        }
+        "gdrive.list" => {
+            properties.insert("folder_id".into(), json!({"type": "string", "description": "Folder ID to list (uses default if omitted)"}));
+            properties.insert("query".into(), json!({"type": "string", "description": "Search query (optional)"}));
+        }
+        "gdrive.share" => {
+            properties.insert("file_id".into(), json!({"type": "string", "description": "File or folder ID to share"}));
+            properties.insert("email".into(), json!({"type": "string", "description": "Email address to share with"}));
+            properties.insert("role".into(), json!({"type": "string", "description": "Permission role: reader, writer, or commenter (defaults to \"reader\")"}));
+            required.push(json!("file_id"));
+            required.push(json!("email"));
+        }
+        "gdrive.get" => {
+            properties.insert("file_id".into(), json!({"type": "string", "description": "File ID to retrieve"}));
+            required.push(json!("file_id"));
+        }
+        _ => {
+            // Unknown connector operation — leave schema empty
+        }
+    }
+
+    (properties, required)
 }
 
 /// Find a template declaration by name in the program.

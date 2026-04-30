@@ -191,10 +191,7 @@ impl<'src> Lexer<'src> {
                     self.cursor.advance();
                     TokenKind::Fallback
                 } else {
-                    return Err(LexError::UnexpectedChar {
-                        ch: '?',
-                        span: (start..start + 1).into(),
-                    });
+                    TokenKind::Question
                 }
             }
 

@@ -80,11 +80,13 @@ pub mod tool_loop;
 /// Anthropic Messages API request and response types.
 pub mod types;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use client::AnthropicClient;
 pub use client::StreamEvent;
 pub use federated::FederatedDispatcher;
+use futures_util::future::BoxFuture;
 pub use ollama::OllamaDispatcher;
 pub use openai::OpenAIDispatcher;
 use pact_core::ast::stmt::{AgentDecl, Program};
@@ -92,6 +94,25 @@ use pact_core::interpreter::value::Value;
 use pact_core::interpreter::Dispatcher;
 pub use rate_limit::{RateLimitConfig, RateLimiter};
 use tool_loop::ToolUseLoop;
+
+/// Pluggable runner for `connector X.action` handlers.
+///
+/// The dispatcher itself does not know about specific external services
+/// (GitHub, Slack, etc.) — it delegates execution to an implementor of
+/// this trait. The host (e.g. `pact-server`) supplies a runner with the
+/// user's credentials at construction time.
+pub trait ConnectorRunner: Send + Sync {
+    /// Execute a connector operation.
+    ///
+    /// # Arguments
+    /// * `operation` — `<connector>.<action>` (e.g. `github.push_file`).
+    /// * `params` — tool parameters as string key/value pairs.
+    fn execute<'a>(
+        &'a self,
+        operation: &'a str,
+        params: HashMap<String, String>,
+    ) -> BoxFuture<'a, Result<String, String>>;
+}
 
 use thiserror::Error;
 use tracing::info;
@@ -188,11 +209,28 @@ impl ClaudeDispatcher {
         self
     }
 
+    /// Set the project context (the user's original prompt).
+    ///
+    /// This context flows into tool simulations so that external integration
+    /// stubs produce output relevant to the user's actual project.
+    pub fn set_project_context(&mut self, context: String) {
+        self.tool_loop.set_project_context(context);
+    }
+
     /// Configure rate limiting for this dispatcher.
     pub fn with_rate_limits(mut self, config: RateLimitConfig) -> Self {
         let limiter = Arc::new(RateLimiter::new(config));
         self.tool_loop = self.tool_loop.with_rate_limiter(Arc::clone(&limiter));
         self.rate_limiter = Some(limiter);
+        self
+    }
+
+    /// Attach a connector runner that handles `connector X.action` handlers.
+    ///
+    /// Without a runner, any tool whose handler starts with `connector ` will
+    /// fail with an explicit `ExecutionError`.
+    pub fn with_connector_runner(mut self, runner: Arc<dyn ConnectorRunner>) -> Self {
+        self.tool_loop = self.tool_loop.with_connector_runner(runner);
         self
     }
 

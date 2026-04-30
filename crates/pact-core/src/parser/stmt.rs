@@ -322,7 +322,7 @@ impl<'t> Parser<'t> {
 
     /// Parse `flow name(params) -> ReturnType { body }`.
     fn parse_flow_decl(&mut self) -> Result<FlowDecl, ParseError> {
-        let name = self.expect_ident("flow name")?;
+        let name = self.expect_name("flow name")?;
 
         // Parameters
         self.expect(&TokenKind::LParen)?;
@@ -381,7 +381,7 @@ impl<'t> Parser<'t> {
     /// Parse `tool #name { ... }` or `tool #name = mcp server/tool`.
     fn parse_tool_decl(&mut self) -> Result<ToolDecl, ParseError> {
         self.expect(&TokenKind::Hash)?;
-        let name = self.expect_ident("tool name")?;
+        let name = self.expect_name("tool name")?;
 
         // Check for shorthand: tool #name = mcp server/tool
         if self.check(&TokenKind::Eq) {
@@ -418,6 +418,7 @@ impl<'t> Parser<'t> {
                 validate: None,
                 cache: None,
                 mcp_import: Some((server, tool)),
+                defaults: std::collections::BTreeMap::new(),
             });
         }
 
@@ -606,6 +607,7 @@ impl<'t> Parser<'t> {
             validate,
             cache,
             mcp_import: None,
+            defaults: std::collections::BTreeMap::new(),
         })
     }
 
@@ -637,7 +639,7 @@ impl<'t> Parser<'t> {
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             let span = self.current_span();
-            let field_name = self.expect_name("field name")?;
+            let field_name = self.expect_any_ident("field name")?;
             self.expect(&TokenKind::ColonColon)?;
             let ty = self.parse_type_expr()?;
             let field_span = span.merge(self.previous_span());
@@ -683,10 +685,10 @@ impl<'t> Parser<'t> {
     fn parse_permit_node(&mut self) -> Result<PermitNode, ParseError> {
         let span = self.current_span();
         self.expect(&TokenKind::Caret)?;
-        let mut path = vec![self.expect_ident("permission name")?];
+        let mut path = vec![self.expect_any_ident("permission name")?];
         while self.check(&TokenKind::Dot) {
             self.advance();
-            path.push(self.expect_ident("permission segment")?);
+            path.push(self.expect_any_ident("permission segment")?);
         }
 
         let children = if self.check(&TokenKind::LBrace) {
@@ -1237,7 +1239,7 @@ impl<'t> Parser<'t> {
                 });
             } else {
                 // FIELD_NAME :: Type [* count] [<<description>>]
-                let field_name = self.expect_name("field name")?;
+                let field_name = self.expect_any_ident("field name")?;
                 self.expect(&TokenKind::ColonColon)?;
                 let ty = self.parse_type_expr()?;
 

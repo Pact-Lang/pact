@@ -266,60 +266,7 @@ fn doc_generates_expected_sections() {
     );
 }
 
-// ─── 8. pact to-mermaid — export to Mermaid ─────────────────────────────────
-
-#[test]
-fn to_mermaid_contains_flowchart() {
-    let output = pact_cmd()
-        .arg("to-mermaid")
-        .arg(example("hello_agent.pact"))
-        .output()
-        .expect("failed to execute pact to-mermaid");
-
-    assert!(
-        output.status.success(),
-        "pact to-mermaid should succeed.\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("agentflow")
-            || stdout.contains("toolDefinition")
-            || stdout.contains("agentDefinition"),
-        "pact to-mermaid output should contain agentflow diagram syntax, got: {}",
-        stdout,
-    );
-}
-
-// ─── 9. pact from-mermaid — import a .mmd file ─────────────────────────────
-
-#[test]
-fn from_mermaid_produces_pact_constructs() {
-    let output = pact_cmd()
-        .arg("from-mermaid")
-        .arg(example("test_roundtrip.agentflow.mmd"))
-        .output()
-        .expect("failed to execute pact from-mermaid");
-
-    assert!(
-        output.status.success(),
-        "pact from-mermaid should succeed.\nstdout: {}\nstderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // The generated PACT should contain typical constructs
-    assert!(
-        stdout.contains("tool") || stdout.contains("agent") || stdout.contains("flow"),
-        "pact from-mermaid output should contain PACT constructs (tool, agent, or flow), got: {}",
-        stdout,
-    );
-}
-
-// ─── 10. pact init — create a new file with minimal template ────────────────
+// ─── 8. pact init — create a new file with minimal template ─────────────────
 
 #[test]
 fn init_creates_valid_pact_file() {

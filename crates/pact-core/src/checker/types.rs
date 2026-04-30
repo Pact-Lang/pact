@@ -20,7 +20,24 @@ use crate::checker::scope::SymbolKind;
 
 /// Built-in type names recognized by the PACT type system.
 pub const BUILTIN_TYPES: &[&str] = &[
+    // Core types
     "String", "Int", "Float", "Bool", "List", "Map", "Optional", "Any", "Record",
+    // Output format types
+    "HTML", "Webpage", "Website",
+    "PDF",
+    "Markdown", "MD",
+    "JSON",
+    "CSV",
+    "YAML", "YML",
+    "SVG",
+    "XML",
+    "SQL",
+    "Image", "PNG", "JPG", "JPEG", "Photo",
+    "Audio", "MP3", "WAV", "Sound", "Voice",
+    "Video", "MP4", "Clip", "Animation",
+    "Code", "Project", "Archive", "ZIP",
+    "Slides", "Presentation", "PPTX", "Deck",
+    "Excel", "XLSX", "Spreadsheet", "Workbook",
 ];
 
 /// Check if a type name is a built-in type.
@@ -215,6 +232,15 @@ mod tests {
         assert!(is_builtin_type("List"));
         assert!(is_builtin_type("Record"));
         assert!(!is_builtin_type("CustomType"));
+
+        // Output format types
+        assert!(is_builtin_type("HTML"));
+        assert!(is_builtin_type("PDF"));
+        assert!(is_builtin_type("JSON"));
+        assert!(is_builtin_type("CSV"));
+        assert!(is_builtin_type("Image"));
+        assert!(is_builtin_type("Slides"));
+        assert!(is_builtin_type("Excel"));
     }
 
     #[test]

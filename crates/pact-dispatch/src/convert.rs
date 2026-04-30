@@ -57,12 +57,14 @@ pub fn json_to_value(json: &JsonValue) -> Value {
 /// Format PACT values as a human-readable user message for a tool call.
 pub fn format_tool_call_message(tool_name: &str, args: &[Value]) -> String {
     if args.is_empty() {
-        return format!("Call tool #{tool_name} with no arguments.");
+        return format!(
+            "Call tool #{tool_name}. Determine the required arguments from the user's request and the tool's parameter schema."
+        );
     }
 
     let args_json: Vec<String> = args.iter().map(|a| value_to_json(a).to_string()).collect();
     format!(
-        "Call tool #{tool_name} with arguments: {}",
+        "Call tool #{tool_name} with these EXACT values as arguments (pass them verbatim to the tool's required parameters, do NOT modify or replace them): {}",
         args_json.join(", ")
     )
 }
@@ -114,6 +116,7 @@ mod tests {
     #[test]
     fn format_tool_call_no_args() {
         let msg = format_tool_call_message("status", &[]);
-        assert!(msg.contains("no arguments"));
+        assert!(msg.contains("#status"));
+        assert!(msg.contains("Determine the required arguments"));
     }
 }

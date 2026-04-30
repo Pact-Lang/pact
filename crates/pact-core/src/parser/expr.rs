@@ -264,7 +264,7 @@ impl<'t> Parser<'t> {
         loop {
             if self.check(&TokenKind::Dot) {
                 self.advance();
-                let field = self.expect_ident("field name")?;
+                let field = self.expect_any_ident("field name")?;
                 let span = expr.span.merge(self.previous_span());
                 expr = Expr {
                     kind: ExprKind::FieldAccess {
@@ -356,7 +356,7 @@ impl<'t> Parser<'t> {
             // Tool ref: #name
             TokenKind::Hash => {
                 self.advance();
-                let name = self.expect_ident("tool name")?;
+                let name = self.expect_name("tool name")?;
                 let span = span.merge(self.previous_span());
                 Ok(Expr {
                     kind: ExprKind::ToolRef(name),
@@ -378,10 +378,10 @@ impl<'t> Parser<'t> {
             // Permission ref: ^name.name.name
             TokenKind::Caret => {
                 self.advance();
-                let mut segments = vec![self.expect_ident("permission name")?];
+                let mut segments = vec![self.expect_any_ident("permission name")?];
                 while self.check(&TokenKind::Dot) {
                     self.advance();
-                    segments.push(self.expect_ident("permission segment")?);
+                    segments.push(self.expect_any_ident("permission segment")?);
                 }
                 let span = span.merge(self.previous_span());
                 Ok(Expr {
@@ -475,7 +475,7 @@ impl<'t> Parser<'t> {
                 // We look ahead for the pattern: Ident Colon
                 let mut fields = Vec::new();
                 while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
-                    let field_name = self.expect_ident("record field name")?;
+                    let field_name = self.expect_any_ident("record field name")?;
                     self.expect(&TokenKind::Colon)?;
                     let value = self.parse_expr()?;
                     fields.push((field_name, value));
@@ -506,7 +506,7 @@ impl<'t> Parser<'t> {
             // Run flow: run flow_name(args)
             TokenKind::Run => {
                 self.advance();
-                let flow_name = self.expect_ident("flow name")?;
+                let flow_name = self.expect_name("flow name")?;
                 self.expect(&TokenKind::LParen)?;
                 let args = self.parse_comma_separated(|p| p.parse_expr(), &TokenKind::RParen)?;
                 self.expect(&TokenKind::RParen)?;

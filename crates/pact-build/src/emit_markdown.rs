@@ -57,6 +57,20 @@ pub fn generate_agent_prompt(agent: &AgentDecl, program: &Program) -> String {
                 let description = extract_description(&tool_decl.description);
                 md.push_str(&format!("- **{}**: {}\n", tool_name, description));
 
+                // Show return type with mandatory/optional hint
+                if let Some(rt) = &tool_decl.return_type {
+                    let is_optional = matches!(
+                        rt.kind,
+                        pact_core::ast::types::TypeExprKind::Optional(_)
+                    );
+                    let ty_str = format_type(rt);
+                    if is_optional {
+                        md.push_str(&format!("  - Returns: `{}` (optional — empty result is acceptable)\n", ty_str));
+                    } else {
+                        md.push_str(&format!("  - Returns: `{}` (**mandatory** — you MUST produce a non-empty result of this type)\n", ty_str));
+                    }
+                }
+
                 // Show parameters
                 if !tool_decl.params.is_empty() {
                     for param in &tool_decl.params {
@@ -185,6 +199,18 @@ pub fn generate_agent_prompt(agent: &AgentDecl, program: &Program) -> String {
         }
         md.push('\n');
     }
+
+    // Output behavior: pass through tool content verbatim
+    md.push_str("## Output Rules\n\n");
+    md.push_str(
+        "CRITICAL: Your final text response MUST contain the output content. \
+         After calling your tools, take the result from the last tool call and \
+         return it as your final text response. Do NOT return an empty response.\n\n\
+         When a tool returns content that IS the deliverable (HTML, code, data, reports), \
+         return that content verbatim — do NOT summarize, describe, or narrate it. \
+         Do NOT add commentary like \"I've generated...\" or \"Here is the...\". \
+         Just output the raw content exactly as the tool returned it.\n\n",
+    );
 
     // Auto-generated guardrails (security, compliance, boundaries)
     md.push_str(&guardrails::generate_guardrails(agent, program));

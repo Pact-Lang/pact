@@ -36,6 +36,8 @@ pub enum TokenKind {
     Dollar,
     /// `%` — template reference prefix
     Percent,
+    /// `?` — optional type suffix
+    Question,
     /// `?>` — fallback operator
     Fallback,
     /// `|>` — pipeline operator
@@ -237,6 +239,59 @@ impl TokenKind {
             Self::Retry => Some("retry"),
             Self::Output => Some("output"),
             Self::Section => Some("section"),
+            Self::Returns => Some("returns"),
+            _ => None,
+        }
+    }
+
+    /// Return the keyword text if this token is any keyword, for use in
+    /// permission paths where all keywords are valid segments.
+    pub fn as_keyword_ident(&self) -> Option<&'static str> {
+        // First check contextual keywords.
+        if let Some(s) = self.as_contextual_ident() {
+            return Some(s);
+        }
+        // Then check statement/other keywords.
+        match self {
+            Self::Agent => Some("agent"),
+            Self::AgentBundle => Some("agent_bundle"),
+            Self::Flow => Some("flow"),
+            Self::Schema => Some("schema"),
+            Self::Type => Some("type"),
+            Self::PermitTree => Some("permit_tree"),
+            Self::Test => Some("test"),
+            Self::Tool => Some("tool"),
+            Self::Skill => Some("skill"),
+            Self::Template => Some("template"),
+            Self::Directive => Some("directive"),
+            Self::Import => Some("import"),
+            Self::Connect => Some("connect"),
+            Self::Lesson => Some("lesson"),
+            Self::Compliance => Some("compliance"),
+            Self::Federation => Some("federation"),
+            Self::Run => Some("run"),
+            Self::Record => Some("record"),
+            Self::On => Some("on"),
+            Self::Parallel => Some("parallel"),
+            Self::Assert => Some("assert"),
+            Self::Return => Some("return"),
+            Self::Fail => Some("fail"),
+            Self::Match => Some("match"),
+            Self::If => Some("if"),
+            Self::Else => Some("else"),
+            Self::True => Some("true"),
+            Self::False => Some("false"),
+            Self::Requires => Some("requires"),
+            Self::Permits => Some("permits"),
+            Self::Tools => Some("tools"),
+            Self::Skills => Some("skills"),
+            Self::Params => Some("params"),
+            Self::Prompt => Some("prompt"),
+            Self::Memory => Some("memory"),
+            Self::Agents => Some("agents"),
+            Self::Fallbacks => Some("fallbacks"),
+            Self::Directives => Some("directives"),
+            Self::OnError => Some("on_error"),
             _ => None,
         }
     }
@@ -251,6 +306,7 @@ impl TokenKind {
             Self::Caret => "'^'",
             Self::Dollar => "'$'",
             Self::Percent => "'%'",
+            Self::Question => "'?'",
             Self::Fallback => "'?>'",
             Self::Pipe => "'|>'",
             Self::ColonColon => "'::'",

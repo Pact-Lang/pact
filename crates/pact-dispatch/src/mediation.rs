@@ -287,14 +287,21 @@ impl RuntimeMediator {
         tool_name: &str,
         program: &Program,
     ) -> Result<(), MediationError> {
-        // 1. Empty output check — if the called tool has a return type, output shouldn't be empty
+        // 1. Empty output check — if the called tool has a mandatory return type,
+        //    output shouldn't be empty. Optional return types (`Type?`) allow empty.
         if output.trim().is_empty() {
             if let Some(tool_decl) = find_tool_decl(program, tool_name) {
                 if let Some(ty) = &tool_decl.return_type {
-                    return Err(MediationError::EmptyOutput {
-                        agent_name: self.agent_name.clone(),
-                        expected_type: format_type(ty),
-                    });
+                    let is_optional = matches!(
+                        ty.kind,
+                        pact_core::ast::types::TypeExprKind::Optional(_)
+                    );
+                    if !is_optional {
+                        return Err(MediationError::EmptyOutput {
+                            agent_name: self.agent_name.clone(),
+                            expected_type: format_type(ty),
+                        });
+                    }
                 }
             }
         }

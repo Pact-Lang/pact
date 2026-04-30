@@ -9,7 +9,7 @@ use crate::DispatchError;
 use futures_util::StreamExt;
 use pact_build::emit_claude::ClaudeRequest;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{error, info, warn};
 
 /// The Anthropic API version header value.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -77,10 +77,11 @@ impl AnthropicClient {
 
     /// Create a client with the given API key.
     ///
-    /// Configures a 90-second request timeout for token-heavy requests.
+    /// Configures a 15-minute request timeout for complex multi-tool agent calls.
+    /// Large flows with many tools can produce long prompts that take time to process.
     pub fn new(api_key: String) -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(90))
+            .timeout(std::time::Duration::from_secs(900))
             .build()
             .unwrap_or_else(|e| {
                 warn!(error = %e, "TLS client build failed, falling back to default");
@@ -111,15 +112,31 @@ impl AnthropicClient {
         request: &ClaudeRequest,
     ) -> Result<MessagesResponse, DispatchError> {
         let url = format!("{}/v1/messages", self.base_url);
+        let model = &request.model;
+        let tool_count = request.tools.len();
+
+        info!(
+            model,
+            tools = tool_count,
+            max_tokens = request.max_tokens,
+            "Anthropic API call starting"
+        );
 
         let mut last_err = None;
         for attempt in 0..=Self::MAX_RETRIES {
             if attempt > 0 {
                 let delay_ms = 1000 * 2u64.pow(attempt - 1); // 1s, 2s, 4s
-                warn!(attempt, delay_ms, max = Self::MAX_RETRIES, "API retry");
+                warn!(
+                    attempt,
+                    delay_ms,
+                    max = Self::MAX_RETRIES,
+                    model,
+                    "Anthropic API retry"
+                );
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             }
 
+            let started = std::time::Instant::now();
             let response = match self
                 .http
                 .post(&url)
@@ -132,13 +149,32 @@ impl AnthropicClient {
             {
                 Ok(r) => r,
                 Err(e) => {
+                    let elapsed = started.elapsed();
+                    let is_timeout = e.is_timeout();
+                    let is_connect = e.is_connect();
+                    error!(
+                        attempt,
+                        model,
+                        elapsed_secs = elapsed.as_secs(),
+                        is_timeout,
+                        is_connect,
+                        error = %e,
+                        "Anthropic API request failed"
+                    );
                     last_err = Some(DispatchError::HttpError(e.to_string()));
                     continue;
                 }
             };
 
+            let elapsed = started.elapsed();
             let status = response.status();
             if status.is_success() {
+                info!(
+                    model,
+                    elapsed_secs = elapsed.as_secs(),
+                    status = status.as_u16(),
+                    "Anthropic API call succeeded"
+                );
                 let resp: MessagesResponse = response
                     .json()
                     .await
@@ -153,6 +189,14 @@ impl AnthropicClient {
 
             // Retry on 429 (rate limited) or 5xx (server error)
             if status.as_u16() == 429 || status.is_server_error() {
+                warn!(
+                    attempt,
+                    model,
+                    status = status.as_u16(),
+                    elapsed_secs = elapsed.as_secs(),
+                    body = body.chars().take(500).collect::<String>(),
+                    "Anthropic API retryable error"
+                );
                 last_err = Some(DispatchError::ApiError {
                     status: status.as_u16(),
                     body,
@@ -161,12 +205,24 @@ impl AnthropicClient {
             }
 
             // Non-retryable error
+            error!(
+                model,
+                status = status.as_u16(),
+                elapsed_secs = elapsed.as_secs(),
+                body = body.chars().take(500).collect::<String>(),
+                "Anthropic API non-retryable error"
+            );
             return Err(DispatchError::ApiError {
                 status: status.as_u16(),
                 body,
             });
         }
 
+        error!(
+            model,
+            retries = Self::MAX_RETRIES,
+            "Anthropic API all retries exhausted"
+        );
         Err(last_err.unwrap_or_else(|| {
             DispatchError::HttpError("all retry attempts exhausted".to_string())
         }))

@@ -40,10 +40,13 @@ impl<'t> Parser<'t> {
         let ty = TypeExpr { kind, span };
 
         // Check for optional: Type?
-        if self.check(&TokenKind::Fallback) {
-            // We reuse '?>' token — but for types we only want '?'.
-            // For v0.1, we won't support `Type?` to keep the lexer simple.
-            // Optional types can be expressed as `Optional<Type>`.
+        if self.check(&TokenKind::Question) {
+            self.advance();
+            let span = start.merge(self.previous_span());
+            return Ok(TypeExpr {
+                kind: TypeExprKind::Optional(Box::new(ty)),
+                span,
+            });
         }
 
         Ok(ty)

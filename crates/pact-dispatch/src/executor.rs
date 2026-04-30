@@ -47,6 +47,15 @@ pub enum HandlerSpec {
         /// The tool name on the MCP server.
         tool: String,
     },
+    /// Connector handler: external service operation (e.g. `github.push_file`).
+    ///
+    /// Routed through a [`crate::ConnectorRunner`] supplied at dispatcher
+    /// construction time. The runner is responsible for credential lookup,
+    /// authentication, and the actual API call.
+    Connector {
+        /// The full operation in `connector.action` form (e.g. `github.push_file`).
+        operation: String,
+    },
 }
 
 /// Parse a handler string into a `HandlerSpec`.
@@ -67,6 +76,19 @@ pub fn parse_handler(spec: &str) -> Result<HandlerSpec, DispatchError> {
     if let Some(rest) = spec.strip_prefix("sh ") {
         return Ok(HandlerSpec::Shell {
             command: rest.trim().to_string(),
+        });
+    }
+
+    if let Some(rest) = spec.strip_prefix("connector ") {
+        let op = rest.trim();
+        if op.is_empty() || !op.contains('.') {
+            return Err(DispatchError::ExecutionError(format!(
+                "connector handler requires 'connector.action' format (e.g. 'connector github.push_file'), got: '{}'",
+                spec
+            )));
+        }
+        return Ok(HandlerSpec::Connector {
+            operation: op.to_string(),
         });
     }
 
@@ -97,7 +119,7 @@ pub fn parse_handler(spec: &str) -> Result<HandlerSpec, DispatchError> {
     }
 
     Err(DispatchError::ExecutionError(format!(
-        "unknown handler format: '{}'. Expected 'http METHOD url', 'sh command', 'builtin:name', or 'mcp server/tool'",
+        "unknown handler format: '{}'. Expected 'http METHOD url', 'sh command', 'builtin:name', 'mcp server/tool', or 'connector connector.action'",
         spec
     )))
 }
@@ -188,6 +210,10 @@ pub async fn execute_handler(
             "MCP handler mcp {}/{} must be executed through the MCP connection pool, not execute_handler",
             server, tool
         ))),
+        HandlerSpec::Connector { operation } => Err(DispatchError::ExecutionError(format!(
+            "connector handler '{}' must be executed through a ConnectorRunner, not execute_handler",
+            operation
+        ))),
     }
 }
 
@@ -270,7 +296,7 @@ async fn execute_http(
     if !status.is_success() {
         return Err(DispatchError::ExecutionError(format!(
             "HTTP {method} returned {status}: {}",
-            &body[..body.len().min(500)]
+            { let mut end = body.len().min(500); while end > 0 && !body.is_char_boundary(end) { end -= 1; } &body[..end] }
         )));
     }
 
@@ -313,12 +339,12 @@ async fn execute_shell(
         return Err(DispatchError::ExecutionError(format!(
             "shell command failed (exit {}): stderr={}",
             output.status.code().unwrap_or(-1),
-            &stderr[..stderr.len().min(500)]
+            { let mut end = stderr.len().min(500); while end > 0 && !stderr.is_char_boundary(end) { end -= 1; } &stderr[..end] }
         )));
     }
 
     if !stderr.is_empty() {
-        debug!(stderr = &stderr[..stderr.len().min(200)], "shell stderr");
+        debug!(stderr = { let mut end = stderr.len().min(200); while end > 0 && !stderr.is_char_boundary(end) { end -= 1; } &stderr[..end] }, "shell stderr");
     }
 
     debug!(bytes = stdout.len(), "shell output");
@@ -361,6 +387,13 @@ pub fn handler_required_permissions(spec: &HandlerSpec) -> Vec<&'static str> {
         HandlerSpec::Shell { .. } => vec!["sh.exec"],
         HandlerSpec::Builtin { .. } => vec![],
         HandlerSpec::Mcp { .. } => vec![], // MCP permissions enforced via ^mcp.{server} in mediation
+        // Connectors enforce auth via the user-supplied credential (token/api_key)
+        // passed through ConnectorConfig — adding a generic `net.write` permit on
+        // top would just force every agent that uses a connector to also declare
+        // `^net.write`, which is misleading (the agent has no general internet
+        // write access, only the specific connector). Per-connector permits could
+        // be added later (see `^mcp.{server}` for the pattern).
+        HandlerSpec::Connector { .. } => vec![],
     }
 }
 

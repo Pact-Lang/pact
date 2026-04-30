@@ -152,13 +152,24 @@ fn dedup_consecutive(items: &[String]) -> Vec<&str> {
     result
 }
 
-/// Truncate a string to max_len, appending "..." if truncated.
+/// Truncate a string to approximately max_len bytes, appending "..." if truncated.
+/// Always splits on a valid UTF-8 char boundary.
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        let end = char_boundary(s, max_len);
+        format!("{}...", &s[..end])
     }
+}
+
+/// Find the largest byte index <= `pos` that is a valid UTF-8 char boundary.
+fn char_boundary(s: &str, pos: usize) -> usize {
+    let mut i = pos.min(s.len());
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
 }
 
 /// Summarize and persist a session's summary into the observation store.

@@ -220,6 +220,32 @@ impl<'t> Parser<'t> {
         }
     }
 
+    /// Like `expect_name`, but accepts ALL keywords as identifiers.
+    /// Used for permission paths, schema/template field names, and other
+    /// contexts where any word is valid as an identifier.
+    pub(crate) fn expect_any_ident(&mut self, context: &str) -> Result<String, ParseError> {
+        match self.peek_kind().clone() {
+            TokenKind::Ident(name) => {
+                let name = name.clone();
+                self.advance();
+                Ok(name)
+            }
+            ref tok if tok.as_keyword_ident().is_some() => {
+                let name = tok.as_keyword_ident().unwrap().to_string();
+                self.advance();
+                Ok(name)
+            }
+            _ => {
+                let span = self.current_span();
+                Err(ParseError::UnexpectedToken {
+                    expected: format!("{context} (identifier)"),
+                    found: self.peek_kind().describe().to_string(),
+                    span: (span.start..span.end).into(),
+                })
+            }
+        }
+    }
+
     /// Consume the current token if it matches, otherwise do nothing.
     pub(crate) fn eat(&mut self, kind: &TokenKind) -> bool {
         if self.check(kind) {
@@ -327,6 +353,22 @@ mod tests {
             DeclKind::Schema(s) => {
                 assert_eq!(s.name, "Report");
                 assert_eq!(s.fields.len(), 2);
+            }
+            _ => panic!("expected Schema"),
+        }
+    }
+
+    #[test]
+    fn parse_schema_keyword_field_names() {
+        let src = "schema HealthCheck { cpu:: Float, memory:: Float, disk:: Float }";
+        let prog = parse(src);
+        match &prog.decls[0].kind {
+            DeclKind::Schema(s) => {
+                assert_eq!(s.name, "HealthCheck");
+                assert_eq!(s.fields.len(), 3);
+                assert_eq!(s.fields[0].name, "cpu");
+                assert_eq!(s.fields[1].name, "memory");
+                assert_eq!(s.fields[2].name, "disk");
             }
             _ => panic!("expected Schema"),
         }

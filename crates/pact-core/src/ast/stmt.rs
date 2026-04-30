@@ -495,6 +495,9 @@ pub struct ToolDecl {
     pub cache: Option<String>,
     /// MCP import shorthand: (server_name, tool_name) from `tool #name = mcp server/tool`.
     pub mcp_import: Option<(String, String)>,
+    /// Hard-wired default values injected into connector params at execution time.
+    /// The LLM can override these, but if it doesn't provide a value, the default is used.
+    pub defaults: std::collections::BTreeMap<String, String>,
 }
 
 /// Skill declaration fields.
