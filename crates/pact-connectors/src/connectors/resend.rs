@@ -205,7 +205,7 @@ async fn send_email(
     }
 
     let resp = reqwest::Client::new()
-        .post(&format!("{API_BASE}/emails"))
+        .post(format!("{API_BASE}/emails"))
         .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)

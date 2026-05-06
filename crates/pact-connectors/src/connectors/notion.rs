@@ -144,7 +144,7 @@ async fn search(
     }
 
     let mut req = http(config)
-        .post(&format!("{API_BASE}/search"))
+        .post(format!("{API_BASE}/search"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -181,7 +181,7 @@ async fn get_page(
 ) -> Result<String, ConnectorError> {
     let page_id = require_param(params, "page_id")?;
 
-    let mut req = http(config).get(&format!("{API_BASE}/pages/{page_id}"));
+    let mut req = http(config).get(format!("{API_BASE}/pages/{page_id}"));
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
@@ -239,7 +239,7 @@ async fn create_page(
     }
 
     let mut req = http(config)
-        .post(&format!("{API_BASE}/pages"))
+        .post(format!("{API_BASE}/pages"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -285,7 +285,7 @@ async fn update_page(
 
     let body = serde_json::json!({ "properties": properties });
     let mut req = http(config)
-        .patch(&format!("{API_BASE}/pages/{page_id}"))
+        .patch(format!("{API_BASE}/pages/{page_id}"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -335,7 +335,7 @@ async fn query_database(
     }
 
     let mut req = http(config)
-        .post(&format!("{API_BASE}/databases/{database_id}/query"))
+        .post(format!("{API_BASE}/databases/{database_id}/query"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -372,7 +372,7 @@ async fn get_database(
 ) -> Result<String, ConnectorError> {
     let database_id = require_param(params, "database_id")?;
 
-    let mut req = http(config).get(&format!("{API_BASE}/databases/{database_id}"));
+    let mut req = http(config).get(format!("{API_BASE}/databases/{database_id}"));
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }

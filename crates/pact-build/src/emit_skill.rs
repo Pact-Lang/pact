@@ -89,10 +89,8 @@ fn extract_agent_names(exprs: &[Expr]) -> Vec<String> {
 /// Recursively collect agent names from an expression tree.
 fn collect_agent_names(expr: &Expr, out: &mut Vec<String>) {
     match &expr.kind {
-        ExprKind::AgentRef(name) => {
-            if !out.contains(name) {
-                out.push(name.clone());
-            }
+        ExprKind::AgentRef(name) if !out.contains(name) => {
+            out.push(name.clone());
         }
         ExprKind::AgentDispatch { agent, tool, args } => {
             collect_agent_names(agent, out);

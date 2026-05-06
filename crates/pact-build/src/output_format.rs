@@ -182,7 +182,7 @@ pub fn infer_output_format(program: &Program, flow_name: &str) -> Option<OutputF
     }
 
     // Pick highest score.
-    scores.sort_by(|a, b| b.1.cmp(&a.1));
+    scores.sort_by_key(|&(_, score)| std::cmp::Reverse(score));
     scores.first().map(|(fmt, _)| *fmt)
 }
 

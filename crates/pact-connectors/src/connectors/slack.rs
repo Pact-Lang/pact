@@ -159,7 +159,7 @@ async fn post_message(
     }
 
     let resp = reqwest::Client::new()
-        .post(&format!("{API_BASE}/chat.postMessage"))
+        .post(format!("{API_BASE}/chat.postMessage"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
         .json(&body)
@@ -211,7 +211,7 @@ async fn upload_file(
 
     // Step 1: Get upload URL.
     let resp = reqwest::Client::new()
-        .get(&format!("{API_BASE}/files.getUploadURLExternal"))
+        .get(format!("{API_BASE}/files.getUploadURLExternal"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .query(&[
             ("filename", filename),
@@ -259,7 +259,7 @@ async fn upload_file(
     });
 
     let resp = reqwest::Client::new()
-        .post(&format!("{API_BASE}/files.completeUploadExternal"))
+        .post(format!("{API_BASE}/files.completeUploadExternal"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
         .json(&complete_body)
@@ -312,7 +312,7 @@ async fn add_reaction(
     });
 
     let resp = reqwest::Client::new()
-        .post(&format!("{API_BASE}/reactions.add"))
+        .post(format!("{API_BASE}/reactions.add"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
         .json(&body)

@@ -108,7 +108,7 @@ impl ConnectorRegistry {
 
     /// Check if a named connector is configured.
     pub fn is_configured(&self, name: &str, config: &ConnectorConfig) -> bool {
-        self.get(name).map_or(false, |c| c.is_configured(config))
+        self.get(name).is_some_and(|c| c.is_configured(config))
     }
 
     /// Return the credential schema for a named connector.
