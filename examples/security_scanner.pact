@@ -63,7 +63,7 @@ template %scan_report {
 tool #check_headers {
     description: <<Analyze HTTP security headers of a target URL. Checks for HSTS, CSP, X-Frame-Options, and other security headers.>>
     requires: [^scan.passive]
-    source: ^scan.headers(url)
+    source: ^scan.headers(target_url)
     params { target_url :: String }
     returns :: String
 }
@@ -71,7 +71,7 @@ tool #check_headers {
 tool #check_ssl {
     description: <<Analyze SSL/TLS certificate and configuration. Checks certificate validity, HSTS, and HTTP-to-HTTPS redirect.>>
     requires: [^scan.passive]
-    source: ^scan.ssl(domain)
+    source: ^scan.ssl(target_url)
     params { target_url :: String }
     returns :: String
 }
@@ -79,7 +79,7 @@ tool #check_ssl {
 tool #enumerate_dns {
     description: <<Enumerate DNS records for a domain. Discovers A, AAAA, MX, TXT, CNAME, and NS records.>>
     requires: [^scan.passive]
-    source: ^scan.dns(domain)
+    source: ^scan.dns(target_url)
     params { target_url :: String }
     returns :: String
 }
@@ -87,7 +87,7 @@ tool #enumerate_dns {
 tool #fingerprint_tech {
     description: <<Detect web technologies, frameworks, and server software from HTTP responses and HTML patterns.>>
     requires: [^scan.passive]
-    source: ^scan.technologies(url)
+    source: ^scan.technologies(target_url)
     params { target_url :: String }
     returns :: String
 }
@@ -99,7 +99,7 @@ tool #fingerprint_tech {
 tool #scan_ports {
     description: <<Scan common TCP ports on a target host to identify open services. Tests 19 common ports including HTTP, SSH, databases.>>
     requires: [^scan.active]
-    source: ^scan.ports(host)
+    source: ^scan.ports(target_url)
     params { target_url :: String }
     returns :: String
 }
@@ -107,7 +107,7 @@ tool #scan_ports {
 tool #probe_http {
     description: <<Probe HTTP endpoints for misconfigurations, exposed sensitive files (.env, .git), admin panels, and server info disclosure.>>
     requires: [^scan.active]
-    source: ^scan.http(url)
+    source: ^scan.http(target_url)
     params { target_url :: String }
     returns :: String
 }
