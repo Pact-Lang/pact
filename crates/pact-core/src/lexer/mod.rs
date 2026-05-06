@@ -392,6 +392,7 @@ impl<'src> Lexer<'src> {
             "lesson" => TokenKind::Lesson,
             "compliance" => TokenKind::Compliance,
             "federation" => TokenKind::Federation,
+            "defaults" => TokenKind::Defaults,
             "endpoint" => TokenKind::Endpoint,
             "trust" => TokenKind::Trust,
             _ => TokenKind::Ident(text.to_string()),

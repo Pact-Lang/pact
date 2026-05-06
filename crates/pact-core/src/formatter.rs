@@ -330,6 +330,19 @@ impl Formatter {
             self.push(&format!("cache: \"{}\"\n", cache));
         }
 
+        if !d.defaults.is_empty() {
+            self.push_indent();
+            self.push("defaults {\n");
+            self.indent();
+            for (key, val) in &d.defaults {
+                self.push_indent();
+                self.push(&format!("{}: \"{}\"\n", key, val));
+            }
+            self.dedent();
+            self.push_indent();
+            self.push("}\n");
+        }
+
         self.dedent();
         self.push_line("}");
     }

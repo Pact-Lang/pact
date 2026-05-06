@@ -196,6 +196,8 @@ pub enum TokenKind {
     Compliance,
     /// `federation` — federation registry declaration keyword
     Federation,
+    /// `defaults` — tool parameter defaults block keyword
+    Defaults,
     /// `endpoint` — remote agent endpoint keyword
     Endpoint,
     /// `trust` — federation trust permissions keyword
@@ -227,6 +229,7 @@ impl TokenKind {
     /// starting keywords like `run`, `record`, `on`, etc.
     pub fn as_contextual_ident(&self) -> Option<&'static str> {
         match self {
+            Self::Defaults => Some("defaults"),
             Self::Endpoint => Some("endpoint"),
             Self::Trust => Some("trust"),
             Self::Handler => Some("handler"),
@@ -383,6 +386,7 @@ impl TokenKind {
             Self::Lesson => "'lesson'",
             Self::Compliance => "'compliance'",
             Self::Federation => "'federation'",
+            Self::Defaults => "'defaults'",
             Self::Endpoint => "'endpoint'",
             Self::Trust => "'trust'",
             Self::IntLit(_) => "integer",

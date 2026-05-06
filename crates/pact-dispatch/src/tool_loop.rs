@@ -823,7 +823,11 @@ async fn execute_tool_once(
                         tool_name, operation
                     ))
                 })?;
-                let params = extract_params(input);
+                let mut params = extract_params(input);
+                // Merge tool defaults as base values; LLM-provided params take priority.
+                for (k, v) in &tool_decl.defaults {
+                    params.entry(k.clone()).or_insert_with(|| v.clone());
+                }
                 info!(tool = tool_name, connector = operation.as_str(), "executing connector");
                 let result = runner
                     .execute(operation, params)

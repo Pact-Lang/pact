@@ -435,6 +435,7 @@ impl<'t> Parser<'t> {
         let mut retry = None;
         let mut validate = None;
         let mut cache = None;
+        let mut defaults = std::collections::BTreeMap::new();
 
         while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
             match self.peek_kind().clone() {
@@ -569,10 +570,37 @@ impl<'t> Parser<'t> {
                         }
                     }
                 }
+                TokenKind::Defaults => {
+                    self.advance();
+                    self.expect(&TokenKind::LBrace)?;
+                    while !self.check(&TokenKind::RBrace) && !self.check(&TokenKind::Eof) {
+                        let key = self.expect_name("default parameter name")?;
+                        self.expect(&TokenKind::Colon)?;
+                        match self.peek_kind().clone() {
+                            TokenKind::StringLit(s) => {
+                                self.advance();
+                                defaults.insert(key, s);
+                            }
+                            TokenKind::PromptLit(s) => {
+                                self.advance();
+                                defaults.insert(key, s);
+                            }
+                            _ => {
+                                let span = self.current_span();
+                                return Err(ParseError::UnexpectedToken {
+                                    expected: "default value string".to_string(),
+                                    found: self.peek_kind().describe().to_string(),
+                                    span: (span.start..span.end).into(),
+                                });
+                            }
+                        }
+                    }
+                    self.expect(&TokenKind::RBrace)?;
+                }
                 _ => {
                     let span = self.current_span();
                     return Err(ParseError::UnexpectedToken {
-                        expected: "tool field (description, requires, handler, source, output, directives, params, returns, retry, validate, cache)"
+                        expected: "tool field (description, requires, handler, source, output, directives, params, returns, retry, validate, cache, defaults)"
                             .to_string(),
                         found: self.peek_kind().describe().to_string(),
                         span: (span.start..span.end).into(),
@@ -607,7 +635,7 @@ impl<'t> Parser<'t> {
             validate,
             cache,
             mcp_import: None,
-            defaults: std::collections::BTreeMap::new(),
+            defaults,
         })
     }
 

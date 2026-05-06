@@ -421,3 +421,37 @@ fn full_program_with_all_constructs() {
         test_results[0].0
     );
 }
+
+// ── Tool defaults ────────────────────────────────────────────────────
+
+#[test]
+fn tool_defaults_parsed_and_formatted() {
+    let src = r#"
+tool #create_issue {
+    description: "Create a GitHub issue"
+    handler: "connector:github.create_issue"
+    defaults {
+        repo: "pact-lang/pact"
+        owner: "gabriel"
+    }
+}
+"#;
+    let program = parse(src);
+    let tool = program
+        .decls
+        .iter()
+        .find_map(|d| match &d.kind {
+            DeclKind::Tool(t) => Some(t),
+            _ => None,
+        })
+        .expect("tool declaration");
+    assert_eq!(tool.defaults.len(), 2);
+    assert_eq!(tool.defaults["repo"], "pact-lang/pact");
+    assert_eq!(tool.defaults["owner"], "gabriel");
+
+    // Round-trip through formatter
+    let formatted = pact_core::formatter::format_program(&program);
+    assert!(formatted.contains("defaults {"));
+    assert!(formatted.contains("repo: \"pact-lang/pact\""));
+    assert!(formatted.contains("owner: \"gabriel\""));
+}
