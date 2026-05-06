@@ -53,7 +53,7 @@ jobs:
         run: |
           for f in examples/*.pact; do
             echo "Checking $f ..."
-            cargo run --release -- check "$f" || exit 1
+            cargo run --release --bin pact -- check "$f" || exit 1
           done
 
   wasm:
