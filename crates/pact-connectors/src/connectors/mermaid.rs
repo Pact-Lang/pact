@@ -79,8 +79,12 @@ pub struct MermaidConnector;
 
 #[async_trait]
 impl Connector for MermaidConnector {
-    fn name(&self) -> &'static str { "mermaid" }
-    fn description(&self) -> &'static str { "Mermaid Chart — create, update, and list diagrams" }
+    fn name(&self) -> &'static str {
+        "mermaid"
+    }
+    fn description(&self) -> &'static str {
+        "Mermaid Chart — create, update, and list diagrams"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -123,15 +127,29 @@ impl Connector for MermaidConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["list_projects", "list_documents", "get_document", "create_document", "update_document"]
+        vec![
+            "list_projects",
+            "list_documents",
+            "get_document",
+            "create_document",
+            "update_document",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
         config.mermaid.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.mermaid.as_ref().ok_or(ConnectorError::NotConfigured("mermaid".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .mermaid
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("mermaid".into()))?;
         execute_action(action, params, cfg).await
     }
 
@@ -179,16 +197,22 @@ fn friendly_error(
         403 => format!(
             "Mermaid Chart denied access ({operation}). \
              Your token does not have permission to access this resource{id_hint}.",
-            id_hint = if resource_id.is_empty() { String::new() } else { format!(" (ID: {resource_id})") }
+            id_hint = if resource_id.is_empty() {
+                String::new()
+            } else {
+                format!(" (ID: {resource_id})")
+            }
         ),
         404 => format!(
             "Mermaid Chart resource not found ({operation}){id_hint}. \
              Verify the ID is correct and that your token has access to this project/document.",
-            id_hint = if resource_id.is_empty() { String::new() } else { format!(" — ID '{resource_id}' does not exist or is not accessible") }
+            id_hint = if resource_id.is_empty() {
+                String::new()
+            } else {
+                format!(" — ID '{resource_id}' does not exist or is not accessible")
+            }
         ),
-        _ => format!(
-            "Mermaid Chart API error ({code}) during {operation}: {api_message}"
-        ),
+        _ => format!("Mermaid Chart API error ({code}) during {operation}: {api_message}"),
     };
     ConnectorError::ApiError {
         status: code,
@@ -197,9 +221,7 @@ fn friendly_error(
 }
 
 /// List all projects.
-async fn list_projects(
-    config: &MermaidConfig,
-) -> Result<String, ConnectorError> {
+async fn list_projects(config: &MermaidConfig) -> Result<String, ConnectorError> {
     let url = format!("{API_BASE}/projects");
     let resp = reqwest::Client::new()
         .get(&url)
@@ -247,7 +269,11 @@ async fn resolve_project_id(
         .as_array()
         .and_then(|arr| arr.first())
         .and_then(|p| p["id"].as_str().or(p["projectID"].as_str()))
-        .ok_or_else(|| ConnectorError::HttpError("no projects found — create one in Mermaid Chart first".into()))?;
+        .ok_or_else(|| {
+            ConnectorError::HttpError(
+                "no projects found — create one in Mermaid Chart first".into(),
+            )
+        })?;
     info!(project_id = pid, "auto-detected Mermaid Chart project");
     Ok(pid.to_string())
 }
@@ -336,7 +362,10 @@ async fn create_document(
         .ok_or_else(|| ConnectorError::MissingParam("code".into()))?;
     // Strip markdown code fences (```mermaid ... ```) that LLMs often add.
     let code = strip_code_fences(raw_code);
-    let title = params.get("title").map(|s| s.as_str()).unwrap_or("Untitled");
+    let title = params
+        .get("title")
+        .map(|s| s.as_str())
+        .unwrap_or("Untitled");
 
     // Step 1: Create the document shell.
     let create_url = format!("{API_BASE}/projects/{project_id}/documents");
@@ -360,7 +389,9 @@ async fn create_document(
     if !status.is_success() {
         return Err(friendly_error(
             status,
-            resp_body["message"].as_str().unwrap_or("failed to create document"),
+            resp_body["message"]
+                .as_str()
+                .unwrap_or("failed to create document"),
             "create_document",
             &project_id,
         ));
@@ -395,13 +426,18 @@ async fn create_document(
             .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
         return Err(friendly_error(
             status,
-            err_body["message"].as_str().unwrap_or("failed to set diagram code"),
+            err_body["message"]
+                .as_str()
+                .unwrap_or("failed to set diagram code"),
             "create_document (set code)",
             document_id,
         ));
     }
 
-    info!(project_id, document_id, title, "created Mermaid Chart document");
+    info!(
+        project_id,
+        document_id, title, "created Mermaid Chart document"
+    );
     Ok(serde_json::json!({
         "status": "success",
         "documentID": document_id,

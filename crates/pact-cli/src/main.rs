@@ -142,7 +142,6 @@ enum Command {
         file: String,
     },
 
-
     /// Interactive REPL for experimenting with PACT.
     Playground {
         /// Optional .pact file to preload.

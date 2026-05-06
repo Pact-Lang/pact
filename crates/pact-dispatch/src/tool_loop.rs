@@ -315,7 +315,15 @@ impl ToolUseLoop {
                             .send(StreamEvent::ToolExecuting { name: name.clone() })
                             .await;
 
-                        let result = execute_tool(name, &input, program, &self.client, &task_context, self.connector_runner.as_ref()).await?;
+                        let result = execute_tool(
+                            name,
+                            &input,
+                            program,
+                            &self.client,
+                            &task_context,
+                            self.connector_runner.as_ref(),
+                        )
+                        .await?;
 
                         let _ = tx
                             .send(StreamEvent::ToolResult {
@@ -485,7 +493,9 @@ impl ToolUseLoop {
                     if text.trim().is_empty() {
                         let is_mandatory = find_tool_decl(program, tool_name)
                             .and_then(|t| t.return_type.as_ref())
-                            .map(|ty| !matches!(ty.kind, pact_core::ast::types::TypeExprKind::Optional(_)))
+                            .map(|ty| {
+                                !matches!(ty.kind, pact_core::ast::types::TypeExprKind::Optional(_))
+                            })
                             .unwrap_or(false);
 
                         if is_mandatory && iteration < self.max_iterations {
@@ -623,7 +633,15 @@ impl ToolUseLoop {
                                 }
                             }
 
-                            let result = execute_tool(name, input, program, &self.client, &task_context, self.connector_runner.as_ref()).await?;
+                            let result = execute_tool(
+                                name,
+                                input,
+                                program,
+                                &self.client,
+                                &task_context,
+                                self.connector_runner.as_ref(),
+                            )
+                            .await?;
                             last_tool_result = Some(result.clone());
 
                             // Record tool result observation
@@ -731,7 +749,16 @@ async fn execute_tool(
             }
 
             // Execute with retry, then cache
-            let result = execute_tool_with_retry(tool_name, input, program, max_retries, client, task_context, connector_runner).await?;
+            let result = execute_tool_with_retry(
+                tool_name,
+                input,
+                program,
+                max_retries,
+                client,
+                task_context,
+                connector_runner,
+            )
+            .await?;
             if let Some(ttl) = parse_duration(cache_str) {
                 global_cache().set(cache_key, result.clone(), ttl);
             }
@@ -740,7 +767,16 @@ async fn execute_tool(
     }
 
     // No cache — just execute with retry
-    execute_tool_with_retry(tool_name, input, program, max_retries, client, task_context, connector_runner).await
+    execute_tool_with_retry(
+        tool_name,
+        input,
+        program,
+        max_retries,
+        client,
+        task_context,
+        connector_runner,
+    )
+    .await
 }
 
 /// Execute a tool with retry logic.
@@ -763,7 +799,16 @@ async fn execute_tool_with_retry(
             ))
             .await;
         }
-        match execute_tool_once(tool_name, input, program, client, task_context, connector_runner).await {
+        match execute_tool_once(
+            tool_name,
+            input,
+            program,
+            client,
+            task_context,
+            connector_runner,
+        )
+        .await
+        {
             Ok(result) => return Ok(result),
             Err(e) => {
                 last_error = Some(e);
@@ -828,13 +873,21 @@ async fn execute_tool_once(
                 for (k, v) in &tool_decl.defaults {
                     params.entry(k.clone()).or_insert_with(|| v.clone());
                 }
-                info!(tool = tool_name, connector = operation.as_str(), "executing connector");
-                let result = runner
-                    .execute(operation, params)
-                    .await;
+                info!(
+                    tool = tool_name,
+                    connector = operation.as_str(),
+                    "executing connector"
+                );
+                let result = runner.execute(operation, params).await;
                 match &result {
-                    Ok(_) => info!(tool = tool_name, connector = operation.as_str(), "connector succeeded"),
-                    Err(e) => warn!(tool = tool_name, connector = operation.as_str(), error = %e, "connector failed"),
+                    Ok(_) => info!(
+                        tool = tool_name,
+                        connector = operation.as_str(),
+                        "connector succeeded"
+                    ),
+                    Err(e) => {
+                        warn!(tool = tool_name, connector = operation.as_str(), error = %e, "connector failed")
+                    }
                 }
                 return result.map_err(DispatchError::ExecutionError);
             }
@@ -853,7 +906,10 @@ async fn execute_tool_once(
         Ok(result) => Ok(result),
         Err(e) => {
             // If LLM simulation fails (e.g. bad API key), fall back to rich stub.
-            warn!(tool = tool_name, "LLM simulation failed ({e}), using rich stub");
+            warn!(
+                tool = tool_name,
+                "LLM simulation failed ({e}), using rich stub"
+            );
             Ok(simulation_context.rich_stub)
         }
     }
@@ -866,7 +922,6 @@ struct SimulationContext {
     /// A rich JSON stub to use if the LLM call fails.
     rich_stub: String,
 }
-
 
 /// Build a simulation context from a tool's declaration metadata.
 fn build_simulation_context(
@@ -905,11 +960,18 @@ fn build_simulation_context(
             let mut fields = Vec::new();
             for entry in &template.entries {
                 match entry {
-                    TemplateEntry::Field { name, description, .. } => {
+                    TemplateEntry::Field {
+                        name, description, ..
+                    } => {
                         let desc = description.as_deref().unwrap_or("");
                         fields.push(format!("  - {name}: {desc}"));
                     }
-                    TemplateEntry::Repeat { name, count, description, .. } => {
+                    TemplateEntry::Repeat {
+                        name,
+                        count,
+                        description,
+                        ..
+                    } => {
                         let desc = description.as_deref().unwrap_or("");
                         fields.push(format!("  - {name} (repeat {count}x): {desc}"));
                     }
@@ -928,7 +990,10 @@ fn build_simulation_context(
             t.params
                 .iter()
                 .map(|p| {
-                    let ty_str = p.ty.as_ref().map(|t| format!("{:?}", t.kind)).unwrap_or_else(|| "Any".into());
+                    let ty_str =
+                        p.ty.as_ref()
+                            .map(|t| format!("{:?}", t.kind))
+                            .unwrap_or_else(|| "Any".into());
                     format!("{}: {}", p.name, ty_str)
                 })
                 .collect()
@@ -964,7 +1029,7 @@ fn build_simulation_context(
          output the report text. NEVER say \"I've generated...\" or \"The tool produced...\". \
          NEVER fabricate URLs or claim anything is deployed/live. \
          Return ONLY the raw output — no explanations, no markdown code fences, no preamble. \
-         If there's an output template, populate all fields with realistic values."
+         If there's an output template, populate all fields with realistic values.",
     );
 
     // Build a rich fallback stub.
@@ -976,29 +1041,28 @@ fn build_simulation_context(
     stub.insert("input".into(), input.clone());
 
     // Populate template fields in the stub with placeholder values.
-    if let Some(template) = tool_decl
-        .and_then(|t| t.output.as_ref())
-        .and_then(|tname| {
-            program.decls.iter().find_map(|d| match &d.kind {
-                DeclKind::Template(t) if t.name == *tname => Some(t),
-                _ => None,
-            })
+    if let Some(template) = tool_decl.and_then(|t| t.output.as_ref()).and_then(|tname| {
+        program.decls.iter().find_map(|d| match &d.kind {
+            DeclKind::Template(t) if t.name == *tname => Some(t),
+            _ => None,
         })
-    {
+    }) {
         let mut template_data = serde_json::Map::new();
         for entry in &template.entries {
             match entry {
-                TemplateEntry::Field { name, description, .. } => {
-                    let placeholder = description
-                        .as_deref()
-                        .unwrap_or("sample value")
-                        .to_string();
+                TemplateEntry::Field {
+                    name, description, ..
+                } => {
+                    let placeholder = description.as_deref().unwrap_or("sample value").to_string();
                     template_data.insert(name.clone(), json!(placeholder));
                 }
-                TemplateEntry::Repeat { name, count, description, .. } => {
-                    let placeholder = description
-                        .as_deref()
-                        .unwrap_or("sample item");
+                TemplateEntry::Repeat {
+                    name,
+                    count,
+                    description,
+                    ..
+                } => {
+                    let placeholder = description.as_deref().unwrap_or("sample item");
                     let items: Vec<serde_json::Value> = (1..=*count)
                         .map(|i| json!(format!("{placeholder} #{i}")))
                         .collect();
@@ -1207,9 +1271,16 @@ mod tests {
         let program = Program { decls: vec![] };
         // Use a dummy client — LLM simulation will fail, falling back to rich stub.
         let client = AnthropicClient::new("invalid-key".to_string());
-        let result = execute_tool("search", &json!({"query": "rust"}), &program, &client, "test task", None)
-            .await
-            .unwrap();
+        let result = execute_tool(
+            "search",
+            &json!({"query": "rust"}),
+            &program,
+            &client,
+            "test task",
+            None,
+        )
+        .await
+        .unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(parsed["tool"], "search");
         assert_eq!(parsed["status"], "simulated");
@@ -1217,8 +1288,8 @@ mod tests {
 
     #[test]
     fn build_simulation_context_includes_template_fields() {
-        use pact_core::ast::stmt::{Decl, Program, TemplateDecl, TemplateEntry, ToolDecl};
         use pact_core::ast::expr::{Expr, ExprKind};
+        use pact_core::ast::stmt::{Decl, Program, TemplateDecl, TemplateEntry, ToolDecl};
         use pact_core::ast::types::{TypeExpr, TypeExprKind};
         use pact_core::span::{SourceId, Span};
 
@@ -1228,12 +1299,18 @@ mod tests {
             entries: vec![
                 TemplateEntry::Field {
                     name: "TITLE".into(),
-                    ty: TypeExpr { kind: TypeExprKind::Named("String".into()), span },
+                    ty: TypeExpr {
+                        kind: TypeExprKind::Named("String".into()),
+                        span,
+                    },
                     description: Some("report title".into()),
                 },
                 TemplateEntry::Repeat {
                     name: "ITEMS".into(),
-                    ty: TypeExpr { kind: TypeExprKind::Named("String".into()), span },
+                    ty: TypeExpr {
+                        kind: TypeExprKind::Named("String".into()),
+                        span,
+                    },
                     count: 3,
                     description: Some("line items".into()),
                 },
@@ -1241,14 +1318,20 @@ mod tests {
         };
         let tool = ToolDecl {
             name: "generate_report".into(),
-            description: Expr { kind: ExprKind::PromptLit("generate a report".into()), span },
+            description: Expr {
+                kind: ExprKind::PromptLit("generate a report".into()),
+                span,
+            },
             requires: vec![],
             handler: None,
             source: None,
             output: Some("report".into()),
             directives: vec![],
             params: vec![],
-            return_type: Some(TypeExpr { kind: TypeExprKind::Named("String".into()), span }),
+            return_type: Some(TypeExpr {
+                kind: TypeExprKind::Named("String".into()),
+                span,
+            }),
             retry: None,
             validate: None,
             cache: None,
@@ -1257,19 +1340,45 @@ mod tests {
         };
         let program = Program {
             decls: vec![
-                Decl { kind: pact_core::ast::stmt::DeclKind::Template(template), span },
-                Decl { kind: pact_core::ast::stmt::DeclKind::Tool(tool), span },
+                Decl {
+                    kind: pact_core::ast::stmt::DeclKind::Template(template),
+                    span,
+                },
+                Decl {
+                    kind: pact_core::ast::stmt::DeclKind::Tool(tool),
+                    span,
+                },
             ],
         };
-        let ctx = build_simulation_context("generate_report", &json!({"topic": "Q4 sales"}), &program, "Generate a Q4 sales report");
+        let ctx = build_simulation_context(
+            "generate_report",
+            &json!({"topic": "Q4 sales"}),
+            &program,
+            "Generate a Q4 sales report",
+        );
         // Prompt should mention tool description and template fields.
-        assert!(ctx.prompt.contains("generate a report"), "prompt missing description");
-        assert!(ctx.prompt.contains("TITLE"), "prompt missing template field TITLE");
-        assert!(ctx.prompt.contains("ITEMS"), "prompt missing template field ITEMS");
+        assert!(
+            ctx.prompt.contains("generate a report"),
+            "prompt missing description"
+        );
+        assert!(
+            ctx.prompt.contains("TITLE"),
+            "prompt missing template field TITLE"
+        );
+        assert!(
+            ctx.prompt.contains("ITEMS"),
+            "prompt missing template field ITEMS"
+        );
         // Rich stub should contain template_data.
         let stub: serde_json::Value = serde_json::from_str(&ctx.rich_stub).unwrap();
-        assert!(stub["template_data"]["TITLE"].is_string(), "stub missing TITLE");
-        assert!(stub["template_data"]["ITEMS"].is_array(), "stub missing ITEMS array");
+        assert!(
+            stub["template_data"]["TITLE"].is_string(),
+            "stub missing TITLE"
+        );
+        assert!(
+            stub["template_data"]["ITEMS"].is_array(),
+            "stub missing ITEMS array"
+        );
     }
 
     #[test]

@@ -36,8 +36,12 @@ pub struct FigmaConnector;
 
 #[async_trait]
 impl Connector for FigmaConnector {
-    fn name(&self) -> &'static str { "figma" }
-    fn description(&self) -> &'static str { "Figma — read designs, export assets, get components and styles" }
+    fn name(&self) -> &'static str {
+        "figma"
+    }
+    fn description(&self) -> &'static str {
+        "Figma — read designs, export assets, get components and styles"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -77,8 +81,16 @@ impl Connector for FigmaConnector {
         config.figma.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.figma.as_ref().ok_or(ConnectorError::NotConfigured("figma".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .figma
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("figma".into()))?;
         execute_action(action, params, cfg).await
     }
 }
@@ -94,9 +106,7 @@ pub async fn execute_action(
         "export_node" => export_node(params, config).await,
         "get_components" => get_components(params, config).await,
         "get_styles" => get_styles(params, config).await,
-        _ => Err(ConnectorError::InvalidOperation(format!(
-            "figma.{action}"
-        ))),
+        _ => Err(ConnectorError::InvalidOperation(format!("figma.{action}"))),
     }
 }
 
@@ -183,10 +193,7 @@ async fn export_node(
 ) -> Result<String, ConnectorError> {
     let file_key = require_param(params, "file_key")?;
     let node_id = require_param(params, "node_id")?;
-    let format = params
-        .get("format")
-        .map(|s| s.as_str())
-        .unwrap_or("png");
+    let format = params.get("format").map(|s| s.as_str()).unwrap_or("png");
     let scale = params.get("scale").map(|s| s.as_str()).unwrap_or("2");
 
     let url = format!("{API_BASE}/images/{file_key}");
@@ -265,7 +272,11 @@ async fn get_components(
             })
             .collect();
 
-        info!(file_key, count = components.len(), "Figma components listed");
+        info!(
+            file_key,
+            count = components.len(),
+            "Figma components listed"
+        );
         Ok(serde_json::json!(components).to_string())
     } else {
         Err(ConnectorError::ApiError {

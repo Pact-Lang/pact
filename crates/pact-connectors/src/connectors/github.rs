@@ -42,8 +42,12 @@ pub struct GitHubConnector;
 
 #[async_trait]
 impl Connector for GitHubConnector {
-    fn name(&self) -> &'static str { "github" }
-    fn description(&self) -> &'static str { "GitHub — interact with repositories, pull requests, and issues" }
+    fn name(&self) -> &'static str {
+        "github"
+    }
+    fn description(&self) -> &'static str {
+        "GitHub — interact with repositories, pull requests, and issues"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -161,7 +165,17 @@ impl Connector for GitHubConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["push_file", "create_pr", "create_issue", "read_file", "list_repos", "list_issues", "list_pulls", "get_issue_comments", "get_pull_comments"]
+        vec![
+            "push_file",
+            "create_pr",
+            "create_issue",
+            "read_file",
+            "list_repos",
+            "list_issues",
+            "list_pulls",
+            "get_issue_comments",
+            "get_pull_comments",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
@@ -174,7 +188,9 @@ impl Connector for GitHubConnector {
         params: &HashMap<String, String>,
         config: &ConnectorConfig,
     ) -> Result<String, ConnectorError> {
-        let cfg = config.github.as_ref()
+        let cfg = config
+            .github
+            .as_ref()
             .ok_or(ConnectorError::NotConfigured("github".into()))?;
         execute_action(action, params, cfg).await
     }
@@ -196,9 +212,7 @@ pub async fn execute_action(
         "list_pulls" => list_pulls(params, config).await,
         "get_issue_comments" => get_issue_comments(params, config).await,
         "get_pull_comments" => get_pull_comments(params, config).await,
-        _ => Err(ConnectorError::InvalidOperation(format!(
-            "github.{action}"
-        ))),
+        _ => Err(ConnectorError::InvalidOperation(format!("github.{action}"))),
     }
 }
 
@@ -269,14 +283,8 @@ fn auth_headers(
             AUTHORIZATION,
             format!("Bearer {}", config.token).parse().unwrap(),
         ),
-        (
-            ACCEPT,
-            "application/vnd.github+json".parse().unwrap(),
-        ),
-        (
-            USER_AGENT,
-            "PACT-Server/1.0".parse().unwrap(),
-        ),
+        (ACCEPT, "application/vnd.github+json".parse().unwrap()),
+        (USER_AGENT, "PACT-Server/1.0".parse().unwrap()),
     ]
 }
 
@@ -386,10 +394,7 @@ async fn create_pr(
     let title = params
         .get("title")
         .ok_or_else(|| ConnectorError::MissingParam("title".into()))?;
-    let base = params
-        .get("base")
-        .map(|s| s.as_str())
-        .unwrap_or("main");
+    let base = params.get("base").map(|s| s.as_str()).unwrap_or("main");
     let body_text = params.get("body").map(|s| s.as_str()).unwrap_or("");
     let http = client(config);
 
@@ -399,18 +404,22 @@ async fn create_pr(
     let head: String = if let Some(files_str) = files_json {
         let files: serde_json::Value = serde_json::from_str(files_str)
             .map_err(|e| ConnectorError::HttpError(format!("invalid files JSON: {e}")))?;
-        let files_map = files.as_object()
-            .ok_or_else(|| ConnectorError::HttpError("files must be a JSON object mapping path → content".into()))?;
+        let files_map = files.as_object().ok_or_else(|| {
+            ConnectorError::HttpError("files must be a JSON object mapping path → content".into())
+        })?;
 
         if files_map.is_empty() {
             return Err(ConnectorError::HttpError("files object is empty".into()));
         }
 
         // Generate branch name if not provided.
-        let branch = params.get("head").map(|s| s.to_string()).unwrap_or_else(|| {
-            let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-            format!("pact/{ts}")
-        });
+        let branch = params
+            .get("head")
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                format!("pact/{ts}")
+            });
 
         // Step 1: Get the base branch's latest commit SHA.
         // Try the requested base branch first, then fall back to common defaults.
@@ -424,14 +433,17 @@ async fn create_pr(
 
         let mut base_sha = None;
         for try_branch in &branches_to_try {
-            let base_ref_url = format!("{API_BASE}/repos/{owner}/{repo}/git/ref/heads/{try_branch}");
+            let base_ref_url =
+                format!("{API_BASE}/repos/{owner}/{repo}/git/ref/heads/{try_branch}");
             let mut req = http.get(&base_ref_url);
             for (k, v) in auth_headers(config) {
                 req = req.header(k, v);
             }
             match req.send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    let resp_body: serde_json::Value = resp.json().await
+                    let resp_body: serde_json::Value = resp
+                        .json()
+                        .await
                         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
                     if let Some(sha) = resp_body["object"]["sha"].as_str() {
                         info!(owner, repo, branch = try_branch, "resolved base branch");
@@ -444,7 +456,9 @@ async fn create_pr(
                     let status = resp.status();
                     let body: serde_json::Value = resp.json().await.unwrap_or_default();
                     info!(
-                        owner, repo, branch = try_branch,
+                        owner,
+                        repo,
+                        branch = try_branch,
                         status = status.as_u16(),
                         api_message = body["message"].as_str().unwrap_or(""),
                         "branch not found, trying next"
@@ -463,9 +477,13 @@ async fn create_pr(
         let base_sha = if let Some(sha) = base_sha {
             sha
         } else {
-            info!(owner, repo, "repo appears empty — bootstrapping with initial commit");
+            info!(
+                owner,
+                repo, "repo appears empty — bootstrapping with initial commit"
+            );
             let init_url = format!("{API_BASE}/repos/{owner}/{repo}/contents/README.md");
-            let init_content = BASE64.encode(format!("# {repo}\n\nInitialized by PACT flow.\n").as_bytes());
+            let init_content =
+                BASE64.encode(format!("# {repo}\n\nInitialized by PACT flow.\n").as_bytes());
             let mut req = http.put(&init_url).json(&serde_json::json!({
                 "message": "Initial commit via PACT flow",
                 "content": init_content,
@@ -473,7 +491,10 @@ async fn create_pr(
             for (k, v) in auth_headers(config) {
                 req = req.header(k, v);
             }
-            let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
             let init_status = resp.status();
             let init_body: serde_json::Value = resp.json().await.unwrap_or_default();
             if !init_status.is_success() {
@@ -491,13 +512,21 @@ async fn create_pr(
             for (k, v) in auth_headers(config) {
                 req = req.header(k, v);
             }
-            let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
-            let resp_body: serde_json::Value = resp.json().await
+            let resp = req
+                .send()
+                .await
                 .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
-            resp_body["object"]["sha"].as_str()
-                .ok_or_else(|| ConnectorError::HttpError(format!(
-                    "bootstrapped repo {owner}/{repo} but could not read branch SHA"
-                )))?
+            let resp_body: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+            resp_body["object"]["sha"]
+                .as_str()
+                .ok_or_else(|| {
+                    ConnectorError::HttpError(format!(
+                        "bootstrapped repo {owner}/{repo} but could not read branch SHA"
+                    ))
+                })?
                 .to_string()
         };
 
@@ -510,7 +539,10 @@ async fn create_pr(
         for (k, v) in auth_headers(config) {
             req = req.header(k, v);
         }
-        let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
         let ref_status = resp.status();
         if !ref_status.is_success() {
             let err: serde_json::Value = resp.json().await.unwrap_or_default();
@@ -557,13 +589,19 @@ async fn create_pr(
             for (k, v) in auth_headers(config) {
                 req = req.header(k, v);
             }
-            let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+            let resp = req
+                .send()
+                .await
+                .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
             let push_status = resp.status();
             if !push_status.is_success() {
                 let err: serde_json::Value = resp.json().await.unwrap_or_default();
                 return Err(ConnectorError::ApiError {
                     status: push_status.as_u16(),
-                    message: format!("failed to push {path}: {}", err["message"].as_str().unwrap_or("unknown")),
+                    message: format!(
+                        "failed to push {path}: {}",
+                        err["message"].as_str().unwrap_or("unknown")
+                    ),
                 });
             }
             info!(owner, repo, path, branch = %branch, "pushed file");
@@ -580,14 +618,12 @@ async fn create_pr(
 
     // Step 4: Create the pull request.
     let pr_url = format!("{API_BASE}/repos/{owner}/{repo}/pulls");
-    let mut req = http
-        .post(&pr_url)
-        .json(&serde_json::json!({
-            "title": title,
-            "head": head,
-            "base": resolved_base,
-            "body": body_text,
-        }));
+    let mut req = http.post(&pr_url).json(&serde_json::json!({
+        "title": title,
+        "head": head,
+        "base": resolved_base,
+        "body": body_text,
+    }));
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
@@ -640,13 +676,11 @@ async fn create_issue(
 
     let url = format!("{API_BASE}/repos/{owner}/{repo}/issues");
     let http = client(config);
-    let mut req = http
-        .post(&url)
-        .json(&serde_json::json!({
-            "title": title,
-            "body": body_text,
-            "labels": labels,
-        }));
+    let mut req = http.post(&url).json(&serde_json::json!({
+        "title": title,
+        "body": body_text,
+        "labels": labels,
+    }));
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
@@ -745,9 +779,12 @@ async fn list_issues(
 
     let url = format!("{API_BASE}/repos/{owner}/{repo}/issues");
     let http = client(config);
-    let mut req = http
-        .get(&url)
-        .query(&[("state", state), ("per_page", per_page), ("sort", "updated"), ("direction", "desc")]);
+    let mut req = http.get(&url).query(&[
+        ("state", state),
+        ("per_page", per_page),
+        ("sort", "updated"),
+        ("direction", "desc"),
+    ]);
 
     if let Some(since) = params.get("since") {
         req = req.query(&[("since", since.as_str())]);
@@ -759,9 +796,15 @@ async fn list_issues(
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let issues: Vec<serde_json::Value> = resp_body
@@ -808,36 +851,47 @@ async fn list_pulls(
 
     let url = format!("{API_BASE}/repos/{owner}/{repo}/pulls");
     let http = client(config);
-    let mut req = http
-        .get(&url)
-        .query(&[("state", state), ("per_page", per_page), ("sort", "updated"), ("direction", "desc")]);
+    let mut req = http.get(&url).query(&[
+        ("state", state),
+        ("per_page", per_page),
+        ("sort", "updated"),
+        ("direction", "desc"),
+    ]);
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let pulls: Vec<serde_json::Value> = resp_body
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .map(|p| serde_json::json!({
-                "number": p["number"],
-                "title": p["title"],
-                "state": p["state"],
-                "user": p["user"]["login"],
-                "head": p["head"]["ref"],
-                "base": p["base"]["ref"],
-                "draft": p["draft"],
-                "mergeable_state": p["mergeable_state"],
-                "created_at": p["created_at"],
-                "updated_at": p["updated_at"],
-                "review_comments": p["review_comments"],
-                "url": p["html_url"],
-            }))
+            .map(|p| {
+                serde_json::json!({
+                    "number": p["number"],
+                    "title": p["title"],
+                    "state": p["state"],
+                    "user": p["user"]["login"],
+                    "head": p["head"]["ref"],
+                    "base": p["base"]["ref"],
+                    "draft": p["draft"],
+                    "mergeable_state": p["mergeable_state"],
+                    "created_at": p["created_at"],
+                    "updated_at": p["updated_at"],
+                    "review_comments": p["review_comments"],
+                    "url": p["html_url"],
+                })
+            })
             .collect();
         info!(owner, repo, count = pulls.len(), "listed pull requests");
         Ok(serde_json::json!(pulls).to_string())
@@ -876,24 +930,38 @@ async fn get_issue_comments(
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let comments: Vec<serde_json::Value> = resp_body
             .as_array()
             .unwrap_or(&vec![])
             .iter()
-            .map(|c| serde_json::json!({
-                "id": c["id"],
-                "user": c["user"]["login"],
-                "body": c["body"],
-                "created_at": c["created_at"],
-                "updated_at": c["updated_at"],
-            }))
+            .map(|c| {
+                serde_json::json!({
+                    "id": c["id"],
+                    "user": c["user"]["login"],
+                    "body": c["body"],
+                    "created_at": c["created_at"],
+                    "updated_at": c["updated_at"],
+                })
+            })
             .collect();
-        info!(owner, repo, issue_number, count = comments.len(), "fetched issue comments");
+        info!(
+            owner,
+            repo,
+            issue_number,
+            count = comments.len(),
+            "fetched issue comments"
+        );
         Ok(serde_json::json!(comments).to_string())
     } else {
         Err(friendly_error(
@@ -933,7 +1001,9 @@ async fn get_pull_comments(
         issue_req = issue_req.header(k, v);
     }
 
-    let mut review_req = client(config).get(&review_url).query(&[("per_page", per_page)]);
+    let mut review_req = client(config)
+        .get(&review_url)
+        .query(&[("per_page", per_page)]);
     if let Some(since) = params.get("since") {
         review_req = review_req.query(&[("since", since.as_str())]);
     }
@@ -941,10 +1011,7 @@ async fn get_pull_comments(
         review_req = review_req.header(k, v);
     }
 
-    let (issue_resp, review_resp) = tokio::join!(
-        issue_req.send(),
-        review_req.send(),
-    );
+    let (issue_resp, review_resp) = tokio::join!(issue_req.send(), review_req.send(),);
 
     let mut all_comments: Vec<serde_json::Value> = Vec::new();
 
@@ -991,7 +1058,13 @@ async fn get_pull_comments(
         b_time.cmp(a_time)
     });
 
-    info!(owner, repo, pull_number, count = all_comments.len(), "fetched pull request comments");
+    info!(
+        owner,
+        repo,
+        pull_number,
+        count = all_comments.len(),
+        "fetched pull request comments"
+    );
     Ok(serde_json::json!(all_comments).to_string())
 }
 

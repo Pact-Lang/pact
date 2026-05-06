@@ -17,8 +17,12 @@ pub struct TeamsConnector;
 
 #[async_trait]
 impl Connector for TeamsConnector {
-    fn name(&self) -> &'static str { "teams" }
-    fn description(&self) -> &'static str { "Microsoft Teams — post messages, manage channels and teams" }
+    fn name(&self) -> &'static str {
+        "teams"
+    }
+    fn description(&self) -> &'static str {
+        "Microsoft Teams — post messages, manage channels and teams"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -57,15 +61,28 @@ impl Connector for TeamsConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["post_message", "list_channels", "create_channel", "list_teams"]
+        vec![
+            "post_message",
+            "list_channels",
+            "create_channel",
+            "list_teams",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
         config.teams.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.teams.as_ref().ok_or(ConnectorError::NotConfigured("teams".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .teams
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("teams".into()))?;
         match action {
             "post_message" => post_message(params, cfg).await,
             "list_channels" => list_channels(params, cfg).await,
@@ -76,15 +93,27 @@ impl Connector for TeamsConnector {
     }
 }
 
-fn require_param<'a>(params: &'a HashMap<String, String>, key: &str) -> Result<&'a str, ConnectorError> {
-    params.get(key).map(|s| s.as_str()).ok_or_else(|| ConnectorError::MissingParam(key.into()))
+fn require_param<'a>(
+    params: &'a HashMap<String, String>,
+    key: &str,
+) -> Result<&'a str, ConnectorError> {
+    params
+        .get(key)
+        .map(|s| s.as_str())
+        .ok_or_else(|| ConnectorError::MissingParam(key.into()))
 }
 
-async fn post_message(params: &HashMap<String, String>, config: &TeamsConfig) -> Result<String, ConnectorError> {
+async fn post_message(
+    params: &HashMap<String, String>,
+    config: &TeamsConfig,
+) -> Result<String, ConnectorError> {
     let team_id = require_param(params, "team_id")?;
     let channel_id = require_param(params, "channel_id")?;
     let content = require_param(params, "content")?;
-    let content_type = params.get("content_type").map(|s| s.as_str()).unwrap_or("html");
+    let content_type = params
+        .get("content_type")
+        .map(|s| s.as_str())
+        .unwrap_or("html");
 
     let body = serde_json::json!({
         "body": { "contentType": content_type, "content": content }
@@ -101,18 +130,30 @@ async fn post_message(params: &HashMap<String, String>, config: &TeamsConfig) ->
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let msg_id = resp_body["id"].as_str().unwrap_or("");
         info!(team_id, channel_id, "Teams message posted");
         Ok(serde_json::json!({ "status": "success", "message_id": msg_id }).to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to post message").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to post message")
+                .to_string(),
+        })
     }
 }
 
-async fn list_channels(params: &HashMap<String, String>, config: &TeamsConfig) -> Result<String, ConnectorError> {
+async fn list_channels(
+    params: &HashMap<String, String>,
+    config: &TeamsConfig,
+) -> Result<String, ConnectorError> {
     let team_id = require_param(params, "team_id")?;
 
     let url = format!("{API_BASE}/teams/{team_id}/channels");
@@ -124,17 +165,29 @@ async fn list_channels(params: &HashMap<String, String>, config: &TeamsConfig) -
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(team_id, "Teams channels listed");
         Ok(resp_body["value"].to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to list channels").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to list channels")
+                .to_string(),
+        })
     }
 }
 
-async fn create_channel(params: &HashMap<String, String>, config: &TeamsConfig) -> Result<String, ConnectorError> {
+async fn create_channel(
+    params: &HashMap<String, String>,
+    config: &TeamsConfig,
+) -> Result<String, ConnectorError> {
     let team_id = require_param(params, "team_id")?;
     let display_name = require_param(params, "display_name")?;
 
@@ -154,14 +207,23 @@ async fn create_channel(params: &HashMap<String, String>, config: &TeamsConfig) 
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let channel_id = resp_body["id"].as_str().unwrap_or("");
         info!(team_id, channel_id, display_name, "Teams channel created");
         Ok(serde_json::json!({ "status": "success", "channel_id": channel_id, "display_name": display_name }).to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to create channel").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to create channel")
+                .to_string(),
+        })
     }
 }
 
@@ -175,12 +237,21 @@ async fn list_teams(config: &TeamsConfig) -> Result<String, ConnectorError> {
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!("Teams listed");
         Ok(resp_body["value"].to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to list teams").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to list teams")
+                .to_string(),
+        })
     }
 }

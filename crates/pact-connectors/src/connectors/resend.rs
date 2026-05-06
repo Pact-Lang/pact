@@ -41,8 +41,12 @@ pub struct ResendConnector;
 
 #[async_trait]
 impl Connector for ResendConnector {
-    fn name(&self) -> &'static str { "resend" }
-    fn description(&self) -> &'static str { "Resend — send transactional emails" }
+    fn name(&self) -> &'static str {
+        "resend"
+    }
+    fn description(&self) -> &'static str {
+        "Resend — send transactional emails"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -91,15 +95,28 @@ impl Connector for ResendConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["send", "send_email", "send_html", "send_email_with_attachment"]
+        vec![
+            "send",
+            "send_email",
+            "send_html",
+            "send_email_with_attachment",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
         config.resend.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.resend.as_ref().ok_or(ConnectorError::NotConfigured("resend".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .resend
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("resend".into()))?;
         execute_action(action, params, cfg).await
     }
 }
@@ -113,9 +130,7 @@ pub async fn execute_action(
     match action {
         "send" | "send_email" => send_email(params, config, false).await,
         "send_html" | "send_email_with_attachment" => send_email(params, config, true).await,
-        _ => Err(ConnectorError::InvalidOperation(format!(
-            "resend.{action}"
-        ))),
+        _ => Err(ConnectorError::InvalidOperation(format!("resend.{action}"))),
     }
 }
 
@@ -165,7 +180,11 @@ async fn send_email(
             .ok_or_else(|| ConnectorError::MissingParam("body".into()))?
             .clone();
         // If the content looks like HTML, send as html instead of text.
-        if text.contains("<html") || text.contains("<div") || text.contains("<p>") || text.contains("<br") {
+        if text.contains("<html")
+            || text.contains("<div")
+            || text.contains("<p>")
+            || text.contains("<br")
+        {
             body["html"] = serde_json::json!(text);
         } else {
             body["text"] = serde_json::json!(text);

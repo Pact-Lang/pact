@@ -77,7 +77,11 @@ mod registry {
         let schema = registry.schema_connectors();
         let obj = schema.as_object().unwrap();
         for c in registry.all() {
-            assert!(obj.contains_key(c.name()), "schema_connectors missing: {}", c.name());
+            assert!(
+                obj.contains_key(c.name()),
+                "schema_connectors missing: {}",
+                c.name()
+            );
             let entry = &obj[c.name()];
             assert!(entry["description"].is_string());
             assert!(entry["operations"].is_array());
@@ -219,17 +223,45 @@ mod is_configured {
     fn all_connectors_respond_to_is_configured() {
         let registry = ConnectorRegistry::new();
         let config = ConnectorConfig {
-            github: Some(GitHubConfig { token: "t".into(), owner: "o".into(), repo: "r".into() }),
+            github: Some(GitHubConfig {
+                token: "t".into(),
+                owner: "o".into(),
+                repo: "r".into(),
+            }),
             figma: Some(FigmaConfig { token: "t".into() }),
-            slack: Some(SlackConfig { token: "t".into(), default_channel: None }),
-            resend: Some(ResendConfig { api_key: "k".into(), from: "a@b.c".into() }),
-            gdrive: Some(GDriveConfig { access_token: "t".into(), default_folder: None }),
-            mermaid: Some(MermaidConfig { token: "t".into(), default_project_id: None }),
-            jira: Some(JiraConfig { email: "e".into(), api_token: "t".into(), domain: "d".into(), default_project: None }),
+            slack: Some(SlackConfig {
+                token: "t".into(),
+                default_channel: None,
+            }),
+            resend: Some(ResendConfig {
+                api_key: "k".into(),
+                from: "a@b.c".into(),
+            }),
+            gdrive: Some(GDriveConfig {
+                access_token: "t".into(),
+                default_folder: None,
+            }),
+            mermaid: Some(MermaidConfig {
+                token: "t".into(),
+                default_project_id: None,
+            }),
+            jira: Some(JiraConfig {
+                email: "e".into(),
+                api_token: "t".into(),
+                domain: "d".into(),
+                default_project: None,
+            }),
             notion: Some(NotionConfig { token: "t".into() }),
-            linear: Some(LinearConfig { api_key: "k".into() }),
-            teams: Some(TeamsConfig { access_token: "t".into() }),
-            airtable: Some(AirtableConfig { token: "t".into(), base_id: None }),
+            linear: Some(LinearConfig {
+                api_key: "k".into(),
+            }),
+            teams: Some(TeamsConfig {
+                access_token: "t".into(),
+            }),
+            airtable: Some(AirtableConfig {
+                token: "t".into(),
+                base_id: None,
+            }),
         };
         for c in registry.all() {
             assert!(
@@ -257,7 +289,11 @@ mod trait_impls {
     fn each_connector_has_nonempty_description() {
         let registry = ConnectorRegistry::new();
         for c in registry.all() {
-            assert!(!c.description().is_empty(), "{} has empty description", c.name());
+            assert!(
+                !c.description().is_empty(),
+                "{} has empty description",
+                c.name()
+            );
         }
     }
 
@@ -276,9 +312,21 @@ mod trait_impls {
             let spec = c.spec();
             assert!(spec["name"].is_string(), "{} spec missing name", c.name());
             assert_eq!(spec["name"].as_str().unwrap(), c.name());
-            assert!(spec["description"].is_string(), "{} spec missing description", c.name());
-            assert!(spec["operations"].is_object(), "{} spec missing operations", c.name());
-            assert!(spec["credentials"].is_object(), "{} spec missing credentials", c.name());
+            assert!(
+                spec["description"].is_string(),
+                "{} spec missing description",
+                c.name()
+            );
+            assert!(
+                spec["operations"].is_object(),
+                "{} spec missing operations",
+                c.name()
+            );
+            assert!(
+                spec["credentials"].is_object(),
+                "{} spec missing credentials",
+                c.name()
+            );
         }
     }
 
@@ -318,8 +366,16 @@ mod trait_impls {
         let registry = ConnectorRegistry::new();
         for c in registry.all() {
             let schema = c.credential_schema();
-            assert!(schema["name"].is_string(), "{} cred schema missing name", c.name());
-            assert!(schema["credentials"].is_object(), "{} cred schema missing credentials", c.name());
+            assert!(
+                schema["name"].is_string(),
+                "{} cred schema missing name",
+                c.name()
+            );
+            assert!(
+                schema["credentials"].is_object(),
+                "{} cred schema missing credentials",
+                c.name()
+            );
         }
     }
 
@@ -328,9 +384,16 @@ mod trait_impls {
         let registry = ConnectorRegistry::new();
         for c in registry.all() {
             if c.name() == "mermaid" {
-                assert!(c.prompt_additions().is_some(), "mermaid should have prompt_additions");
+                assert!(
+                    c.prompt_additions().is_some(),
+                    "mermaid should have prompt_additions"
+                );
             } else {
-                assert!(c.prompt_additions().is_none(), "{} should not have prompt_additions", c.name());
+                assert!(
+                    c.prompt_additions().is_none(),
+                    "{} should not have prompt_additions",
+                    c.name()
+                );
             }
         }
     }
@@ -338,33 +401,45 @@ mod trait_impls {
 
 #[cfg(test)]
 mod param_validation {
-    use std::collections::HashMap;
     use crate::connectors::*;
+    use std::collections::HashMap;
 
     fn config_with_github() -> ConnectorConfig {
         ConnectorConfig {
-            github: Some(GitHubConfig { token: "t".into(), owner: "o".into(), repo: "r".into() }),
+            github: Some(GitHubConfig {
+                token: "t".into(),
+                owner: "o".into(),
+                repo: "r".into(),
+            }),
             ..Default::default()
         }
     }
 
     fn config_with_slack() -> ConnectorConfig {
         ConnectorConfig {
-            slack: Some(SlackConfig { token: "t".into(), default_channel: None }),
+            slack: Some(SlackConfig {
+                token: "t".into(),
+                default_channel: None,
+            }),
             ..Default::default()
         }
     }
 
     fn config_with_airtable() -> ConnectorConfig {
         ConnectorConfig {
-            airtable: Some(AirtableConfig { token: "t".into(), base_id: None }),
+            airtable: Some(AirtableConfig {
+                token: "t".into(),
+                base_id: None,
+            }),
             ..Default::default()
         }
     }
 
     fn config_with_linear() -> ConnectorConfig {
         ConnectorConfig {
-            linear: Some(LinearConfig { api_key: "k".into() }),
+            linear: Some(LinearConfig {
+                api_key: "k".into(),
+            }),
             ..Default::default()
         }
     }
@@ -378,7 +453,9 @@ mod param_validation {
 
     fn config_with_teams() -> ConnectorConfig {
         ConnectorConfig {
-            teams: Some(TeamsConfig { access_token: "t".into() }),
+            teams: Some(TeamsConfig {
+                access_token: "t".into(),
+            }),
             ..Default::default()
         }
     }
@@ -387,7 +464,11 @@ mod param_validation {
     async fn not_configured_error() {
         let registry = ConnectorRegistry::new();
         let result = registry
-            .execute_operation("github.push_file", &HashMap::new(), &ConnectorConfig::default())
+            .execute_operation(
+                "github.push_file",
+                &HashMap::new(),
+                &ConnectorConfig::default(),
+            )
             .await;
         assert!(matches!(result, Err(ConnectorError::NotConfigured(_))));
     }
@@ -396,7 +477,11 @@ mod param_validation {
     async fn unknown_connector_error() {
         let registry = ConnectorRegistry::new();
         let result = registry
-            .execute_operation("nonexistent.foo", &HashMap::new(), &ConnectorConfig::default())
+            .execute_operation(
+                "nonexistent.foo",
+                &HashMap::new(),
+                &ConnectorConfig::default(),
+            )
             .await;
         assert!(matches!(result, Err(ConnectorError::UnknownConnector(_))));
     }
@@ -423,7 +508,9 @@ mod param_validation {
     async fn github_push_file_missing_path() {
         let connector = github::GitHubConnector;
         let params: HashMap<String, String> = HashMap::new();
-        let result = connector.execute("push_file", &params, &config_with_github()).await;
+        let result = connector
+            .execute("push_file", &params, &config_with_github())
+            .await;
         assert!(matches!(result, Err(ConnectorError::MissingParam(_))));
     }
 
@@ -431,7 +518,9 @@ mod param_validation {
     async fn slack_post_message_missing_channel() {
         let connector = slack::SlackConnector;
         let params: HashMap<String, String> = HashMap::new();
-        let result = connector.execute("post_message", &params, &config_with_slack()).await;
+        let result = connector
+            .execute("post_message", &params, &config_with_slack())
+            .await;
         assert!(matches!(result, Err(ConnectorError::MissingParam(_))));
     }
 
@@ -477,7 +566,9 @@ mod param_validation {
     async fn linear_create_issue_missing_title() {
         let connector = linear::LinearConnector;
         let params: HashMap<String, String> = HashMap::new();
-        let result = connector.execute("create_issue", &params, &config_with_linear()).await;
+        let result = connector
+            .execute("create_issue", &params, &config_with_linear())
+            .await;
         assert!(matches!(result, Err(ConnectorError::MissingParam(_))));
     }
 
@@ -494,7 +585,9 @@ mod param_validation {
     async fn notion_get_page_missing_page_id() {
         let connector = notion::NotionConnector;
         let params: HashMap<String, String> = HashMap::new();
-        let result = connector.execute("get_page", &params, &config_with_notion()).await;
+        let result = connector
+            .execute("get_page", &params, &config_with_notion())
+            .await;
         assert!(matches!(result, Err(ConnectorError::MissingParam(_))));
     }
 
@@ -511,7 +604,9 @@ mod param_validation {
     async fn teams_post_message_missing_team_id() {
         let connector = teams::TeamsConnector;
         let params: HashMap<String, String> = HashMap::new();
-        let result = connector.execute("post_message", &params, &config_with_teams()).await;
+        let result = connector
+            .execute("post_message", &params, &config_with_teams())
+            .await;
         assert!(matches!(result, Err(ConnectorError::MissingParam(_))));
     }
 }
@@ -526,7 +621,11 @@ mod connector_names_unique {
         let registry = ConnectorRegistry::new();
         let mut names = HashSet::new();
         for c in registry.all() {
-            assert!(names.insert(c.name()), "duplicate connector name: {}", c.name());
+            assert!(
+                names.insert(c.name()),
+                "duplicate connector name: {}",
+                c.name()
+            );
         }
     }
 

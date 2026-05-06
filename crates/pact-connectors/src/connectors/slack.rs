@@ -39,8 +39,12 @@ pub struct SlackConnector;
 
 #[async_trait]
 impl Connector for SlackConnector {
-    fn name(&self) -> &'static str { "slack" }
-    fn description(&self) -> &'static str { "Slack — post messages, upload files, and react to messages" }
+    fn name(&self) -> &'static str {
+        "slack"
+    }
+    fn description(&self) -> &'static str {
+        "Slack — post messages, upload files, and react to messages"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -90,8 +94,16 @@ impl Connector for SlackConnector {
         config.slack.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.slack.as_ref().ok_or(ConnectorError::NotConfigured("slack".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .slack
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("slack".into()))?;
         execute_action(action, params, cfg).await
     }
 }
@@ -106,9 +118,7 @@ pub async fn execute_action(
         "post_message" => post_message(params, config).await,
         "upload_file" => upload_file(params, config).await,
         "add_reaction" => add_reaction(params, config).await,
-        _ => Err(ConnectorError::InvalidOperation(format!(
-            "slack.{action}"
-        ))),
+        _ => Err(ConnectorError::InvalidOperation(format!("slack.{action}"))),
     }
 }
 

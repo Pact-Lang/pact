@@ -296,7 +296,13 @@ async fn execute_http(
     if !status.is_success() {
         return Err(DispatchError::ExecutionError(format!(
             "HTTP {method} returned {status}: {}",
-            { let mut end = body.len().min(500); while end > 0 && !body.is_char_boundary(end) { end -= 1; } &body[..end] }
+            {
+                let mut end = body.len().min(500);
+                while end > 0 && !body.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &body[..end]
+            }
         )));
     }
 
@@ -339,12 +345,27 @@ async fn execute_shell(
         return Err(DispatchError::ExecutionError(format!(
             "shell command failed (exit {}): stderr={}",
             output.status.code().unwrap_or(-1),
-            { let mut end = stderr.len().min(500); while end > 0 && !stderr.is_char_boundary(end) { end -= 1; } &stderr[..end] }
+            {
+                let mut end = stderr.len().min(500);
+                while end > 0 && !stderr.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &stderr[..end]
+            }
         )));
     }
 
     if !stderr.is_empty() {
-        debug!(stderr = { let mut end = stderr.len().min(200); while end > 0 && !stderr.is_char_boundary(end) { end -= 1; } &stderr[..end] }, "shell stderr");
+        debug!(
+            stderr = {
+                let mut end = stderr.len().min(200);
+                while end > 0 && !stderr.is_char_boundary(end) {
+                    end -= 1;
+                }
+                &stderr[..end]
+            },
+            "shell stderr"
+        );
     }
 
     debug!(bytes = stdout.len(), "shell output");

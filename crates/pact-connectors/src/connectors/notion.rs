@@ -18,8 +18,12 @@ pub struct NotionConnector;
 
 #[async_trait]
 impl Connector for NotionConnector {
-    fn name(&self) -> &'static str { "notion" }
-    fn description(&self) -> &'static str { "Notion — search, read, and manage pages and databases" }
+    fn name(&self) -> &'static str {
+        "notion"
+    }
+    fn description(&self) -> &'static str {
+        "Notion — search, read, and manage pages and databases"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -68,15 +72,30 @@ impl Connector for NotionConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["search", "get_page", "create_page", "update_page", "query_database", "get_database"]
+        vec![
+            "search",
+            "get_page",
+            "create_page",
+            "update_page",
+            "query_database",
+            "get_database",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
         config.notion.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.notion.as_ref().ok_or(ConnectorError::NotConfigured("notion".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .notion
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("notion".into()))?;
         match action {
             "search" => search(params, cfg).await,
             "get_page" => get_page(params, cfg).await,
@@ -89,8 +108,14 @@ impl Connector for NotionConnector {
     }
 }
 
-fn require_param<'a>(params: &'a HashMap<String, String>, key: &str) -> Result<&'a str, ConnectorError> {
-    params.get(key).map(|s| s.as_str()).ok_or_else(|| ConnectorError::MissingParam(key.into()))
+fn require_param<'a>(
+    params: &'a HashMap<String, String>,
+    key: &str,
+) -> Result<&'a str, ConnectorError> {
+    params
+        .get(key)
+        .map(|s| s.as_str())
+        .ok_or_else(|| ConnectorError::MissingParam(key.into()))
 }
 
 fn http(_config: &NotionConfig) -> reqwest::Client {
@@ -100,11 +125,17 @@ fn http(_config: &NotionConfig) -> reqwest::Client {
 fn auth_headers(config: &NotionConfig) -> Vec<(reqwest::header::HeaderName, String)> {
     vec![
         (AUTHORIZATION, format!("Bearer {}", config.token)),
-        (reqwest::header::HeaderName::from_static("notion-version"), NOTION_VERSION.to_string()),
+        (
+            reqwest::header::HeaderName::from_static("notion-version"),
+            NOTION_VERSION.to_string(),
+        ),
     ]
 }
 
-async fn search(params: &HashMap<String, String>, config: &NotionConfig) -> Result<String, ConnectorError> {
+async fn search(
+    params: &HashMap<String, String>,
+    config: &NotionConfig,
+) -> Result<String, ConnectorError> {
     let query = require_param(params, "query")?;
 
     let mut body = serde_json::json!({ "query": query });
@@ -112,26 +143,42 @@ async fn search(params: &HashMap<String, String>, config: &NotionConfig) -> Resu
         body["filter"] = serde_json::json!({ "value": filter, "property": "object" });
     }
 
-    let mut req = http(config).post(&format!("{API_BASE}/search"))
+    let mut req = http(config)
+        .post(&format!("{API_BASE}/search"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(query, "Notion search completed");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["message"].as_str().unwrap_or("unknown error").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["message"]
+                .as_str()
+                .unwrap_or("unknown error")
+                .to_string(),
+        })
     }
 }
 
-async fn get_page(params: &HashMap<String, String>, config: &NotionConfig) -> Result<String, ConnectorError> {
+async fn get_page(
+    params: &HashMap<String, String>,
+    config: &NotionConfig,
+) -> Result<String, ConnectorError> {
     let page_id = require_param(params, "page_id")?;
 
     let mut req = http(config).get(&format!("{API_BASE}/pages/{page_id}"));
@@ -139,22 +186,40 @@ async fn get_page(params: &HashMap<String, String>, config: &NotionConfig) -> Re
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(page_id, "Notion page retrieved");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["message"].as_str().unwrap_or("not found").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["message"]
+                .as_str()
+                .unwrap_or("not found")
+                .to_string(),
+        })
     }
 }
 
-async fn create_page(params: &HashMap<String, String>, config: &NotionConfig) -> Result<String, ConnectorError> {
+async fn create_page(
+    params: &HashMap<String, String>,
+    config: &NotionConfig,
+) -> Result<String, ConnectorError> {
     let parent_id = require_param(params, "parent_id")?;
     let title = require_param(params, "title")?;
-    let parent_type = params.get("parent_type").map(|s| s.as_str()).unwrap_or("page_id");
+    let parent_type = params
+        .get("parent_type")
+        .map(|s| s.as_str())
+        .unwrap_or("page_id");
 
     let mut body = serde_json::json!({
         "parent": { parent_type: parent_id },
@@ -173,53 +238,88 @@ async fn create_page(params: &HashMap<String, String>, config: &NotionConfig) ->
         }]);
     }
 
-    let mut req = http(config).post(&format!("{API_BASE}/pages"))
+    let mut req = http(config)
+        .post(&format!("{API_BASE}/pages"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let page_id = resp_body["id"].as_str().unwrap_or("");
         info!(page_id, title, "Notion page created");
-        Ok(serde_json::json!({ "status": "success", "page_id": page_id, "url": resp_body["url"] }).to_string())
+        Ok(
+            serde_json::json!({ "status": "success", "page_id": page_id, "url": resp_body["url"] })
+                .to_string(),
+        )
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["message"].as_str().unwrap_or("failed to create page").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["message"]
+                .as_str()
+                .unwrap_or("failed to create page")
+                .to_string(),
+        })
     }
 }
 
-async fn update_page(params: &HashMap<String, String>, config: &NotionConfig) -> Result<String, ConnectorError> {
+async fn update_page(
+    params: &HashMap<String, String>,
+    config: &NotionConfig,
+) -> Result<String, ConnectorError> {
     let page_id = require_param(params, "page_id")?;
     let properties_str = require_param(params, "properties")?;
     let properties: serde_json::Value = serde_json::from_str(properties_str)
         .map_err(|e| ConnectorError::HttpError(format!("invalid properties JSON: {e}")))?;
 
     let body = serde_json::json!({ "properties": properties });
-    let mut req = http(config).patch(&format!("{API_BASE}/pages/{page_id}"))
+    let mut req = http(config)
+        .patch(&format!("{API_BASE}/pages/{page_id}"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(page_id, "Notion page updated");
         Ok(serde_json::json!({ "status": "success", "page_id": page_id }).to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["message"].as_str().unwrap_or("failed to update").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["message"]
+                .as_str()
+                .unwrap_or("failed to update")
+                .to_string(),
+        })
     }
 }
 
-async fn query_database(params: &HashMap<String, String>, config: &NotionConfig) -> Result<String, ConnectorError> {
+async fn query_database(
+    params: &HashMap<String, String>,
+    config: &NotionConfig,
+) -> Result<String, ConnectorError> {
     let database_id = require_param(params, "database_id")?;
 
     let mut body = serde_json::json!({});
@@ -234,26 +334,42 @@ async fn query_database(params: &HashMap<String, String>, config: &NotionConfig)
         }
     }
 
-    let mut req = http(config).post(&format!("{API_BASE}/databases/{database_id}/query"))
+    let mut req = http(config)
+        .post(&format!("{API_BASE}/databases/{database_id}/query"))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(database_id, "Notion database queried");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["message"].as_str().unwrap_or("query failed").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["message"]
+                .as_str()
+                .unwrap_or("query failed")
+                .to_string(),
+        })
     }
 }
 
-async fn get_database(params: &HashMap<String, String>, config: &NotionConfig) -> Result<String, ConnectorError> {
+async fn get_database(
+    params: &HashMap<String, String>,
+    config: &NotionConfig,
+) -> Result<String, ConnectorError> {
     let database_id = require_param(params, "database_id")?;
 
     let mut req = http(config).get(&format!("{API_BASE}/databases/{database_id}"));
@@ -261,14 +377,26 @@ async fn get_database(params: &HashMap<String, String>, config: &NotionConfig) -
         req = req.header(k, v);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(database_id, "Notion database retrieved");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["message"].as_str().unwrap_or("not found").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["message"]
+                .as_str()
+                .unwrap_or("not found")
+                .to_string(),
+        })
     }
 }

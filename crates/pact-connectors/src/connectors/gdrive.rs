@@ -56,8 +56,12 @@ pub struct GDriveConnector;
 
 #[async_trait]
 impl Connector for GDriveConnector {
-    fn name(&self) -> &'static str { "gdrive" }
-    fn description(&self) -> &'static str { "Google Drive — upload files, create folders, share" }
+    fn name(&self) -> &'static str {
+        "gdrive"
+    }
+    fn description(&self) -> &'static str {
+        "Google Drive — upload files, create folders, share"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -111,8 +115,16 @@ impl Connector for GDriveConnector {
         config.gdrive.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.gdrive.as_ref().ok_or(ConnectorError::NotConfigured("gdrive".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .gdrive
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("gdrive".into()))?;
         execute_action(action, params, cfg).await
     }
 }
@@ -129,9 +141,7 @@ pub async fn execute_action(
         "list" => list_files(params, config).await,
         "share" => share_file(params, config).await,
         "get" => get_file(params, config).await,
-        _ => Err(ConnectorError::InvalidOperation(format!(
-            "gdrive.{action}"
-        ))),
+        _ => Err(ConnectorError::InvalidOperation(format!("gdrive.{action}"))),
     }
 }
 
@@ -181,9 +191,7 @@ async fn upload_file(
         .get("mime_type")
         .map(|s| s.as_str())
         .unwrap_or_else(|| mime_from_name(name));
-    let folder_id = params
-        .get("folder_id")
-        .or(config.default_folder.as_ref());
+    let folder_id = params.get("folder_id").or(config.default_folder.as_ref());
 
     // Build file metadata.
     let mut metadata = serde_json::json!({
@@ -258,9 +266,7 @@ async fn create_folder(
     config: &GDriveConfig,
 ) -> Result<String, ConnectorError> {
     let name = require_param(params, "name")?;
-    let parent_id = params
-        .get("parent_id")
-        .or(config.default_folder.as_ref());
+    let parent_id = params.get("parent_id").or(config.default_folder.as_ref());
 
     let mut metadata = serde_json::json!({
         "name": name,
@@ -312,13 +318,8 @@ async fn list_files(
     params: &HashMap<String, String>,
     config: &GDriveConfig,
 ) -> Result<String, ConnectorError> {
-    let folder_id = params
-        .get("folder_id")
-        .or(config.default_folder.as_ref());
-    let page_size = params
-        .get("limit")
-        .map(|s| s.as_str())
-        .unwrap_or("20");
+    let folder_id = params.get("folder_id").or(config.default_folder.as_ref());
+    let page_size = params.get("limit").map(|s| s.as_str()).unwrap_or("20");
 
     let mut query_parts = vec!["trashed = false".to_string()];
     if let Some(fid) = folder_id {
@@ -333,7 +334,10 @@ async fn list_files(
         .query(&[
             ("q", q.as_str()),
             ("pageSize", page_size),
-            ("fields", "files(id,name,mimeType,size,modifiedTime,webViewLink)"),
+            (
+                "fields",
+                "files(id,name,mimeType,size,modifiedTime,webViewLink)",
+            ),
             ("orderBy", "modifiedTime desc"),
         ])
         .send()
@@ -383,10 +387,7 @@ async fn share_file(
 ) -> Result<String, ConnectorError> {
     let file_id = require_param(params, "file_id")?;
     let email = require_param(params, "email")?;
-    let role = params
-        .get("role")
-        .map(|s| s.as_str())
-        .unwrap_or("reader"); // reader, writer, commenter
+    let role = params.get("role").map(|s| s.as_str()).unwrap_or("reader"); // reader, writer, commenter
 
     let url = format!("{API_BASE}/files/{file_id}/permissions");
     let body = serde_json::json!({
@@ -442,7 +443,10 @@ async fn get_file(
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))
-        .query(&[("fields", "id,name,mimeType,size,modifiedTime,webViewLink,webContentLink,owners,shared")])
+        .query(&[(
+            "fields",
+            "id,name,mimeType,size,modifiedTime,webViewLink,webContentLink,owners,shared",
+        )])
         .send()
         .await
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;

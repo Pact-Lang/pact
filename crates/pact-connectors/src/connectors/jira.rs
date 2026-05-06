@@ -35,8 +35,12 @@ pub struct JiraConnector;
 
 #[async_trait]
 impl Connector for JiraConnector {
-    fn name(&self) -> &'static str { "jira" }
-    fn description(&self) -> &'static str { "Jira — create issues, search, and manage projects" }
+    fn name(&self) -> &'static str {
+        "jira"
+    }
+    fn description(&self) -> &'static str {
+        "Jira — create issues, search, and manage projects"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -88,15 +92,30 @@ impl Connector for JiraConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["create_issue", "search", "search_issues", "get_issue", "add_comment", "list_projects"]
+        vec![
+            "create_issue",
+            "search",
+            "search_issues",
+            "get_issue",
+            "add_comment",
+            "list_projects",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
         config.jira.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.jira.as_ref().ok_or(ConnectorError::NotConfigured("jira".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .jira
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("jira".into()))?;
         execute_action(action, params, cfg).await
     }
 }
@@ -113,9 +132,7 @@ pub async fn execute_action(
         "get_issue" => get_issue(params, config).await,
         "add_comment" => add_comment(params, config).await,
         "list_projects" => list_projects(config).await,
-        _ => Err(ConnectorError::InvalidOperation(format!(
-            "jira.{action}"
-        ))),
+        _ => Err(ConnectorError::InvalidOperation(format!("jira.{action}"))),
     }
 }
 
@@ -349,11 +366,7 @@ async fn add_comment(
     });
 
     let resp = reqwest::Client::new()
-        .post(&format!(
-            "{}/issue/{}/comment",
-            base_url(config),
-            issue_key
-        ))
+        .post(&format!("{}/issue/{}/comment", base_url(config), issue_key))
         .header(AUTHORIZATION, auth_header(config))
         .header(CONTENT_TYPE, "application/json")
         .json(&comment_body)

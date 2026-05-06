@@ -17,8 +17,12 @@ pub struct AirtableConnector;
 
 #[async_trait]
 impl Connector for AirtableConnector {
-    fn name(&self) -> &'static str { "airtable" }
-    fn description(&self) -> &'static str { "Airtable — manage records, tables, and bases" }
+    fn name(&self) -> &'static str {
+        "airtable"
+    }
+    fn description(&self) -> &'static str {
+        "Airtable — manage records, tables, and bases"
+    }
 
     fn credential_schema(&self) -> serde_json::Value {
         serde_json::json!({
@@ -71,15 +75,30 @@ impl Connector for AirtableConnector {
     }
 
     fn operations(&self) -> Vec<&'static str> {
-        vec!["list_records", "get_record", "create_record", "update_record", "search", "list_bases"]
+        vec![
+            "list_records",
+            "get_record",
+            "create_record",
+            "update_record",
+            "search",
+            "list_bases",
+        ]
     }
 
     fn is_configured(&self, config: &ConnectorConfig) -> bool {
         config.airtable.is_some()
     }
 
-    async fn execute(&self, action: &str, params: &HashMap<String, String>, config: &ConnectorConfig) -> Result<String, ConnectorError> {
-        let cfg = config.airtable.as_ref().ok_or(ConnectorError::NotConfigured("airtable".into()))?;
+    async fn execute(
+        &self,
+        action: &str,
+        params: &HashMap<String, String>,
+        config: &ConnectorConfig,
+    ) -> Result<String, ConnectorError> {
+        let cfg = config
+            .airtable
+            .as_ref()
+            .ok_or(ConnectorError::NotConfigured("airtable".into()))?;
         match action {
             "list_records" => list_records(params, cfg).await,
             "get_record" => get_record(params, cfg).await,
@@ -87,25 +106,44 @@ impl Connector for AirtableConnector {
             "update_record" => update_record(params, cfg).await,
             "search" => search(params, cfg).await,
             "list_bases" => list_bases(cfg).await,
-            _ => Err(ConnectorError::InvalidOperation(format!("airtable.{action}"))),
+            _ => Err(ConnectorError::InvalidOperation(format!(
+                "airtable.{action}"
+            ))),
         }
     }
 }
 
-fn require_param<'a>(params: &'a HashMap<String, String>, key: &str) -> Result<&'a str, ConnectorError> {
-    params.get(key).map(|s| s.as_str()).ok_or_else(|| ConnectorError::MissingParam(key.into()))
+fn require_param<'a>(
+    params: &'a HashMap<String, String>,
+    key: &str,
+) -> Result<&'a str, ConnectorError> {
+    params
+        .get(key)
+        .map(|s| s.as_str())
+        .ok_or_else(|| ConnectorError::MissingParam(key.into()))
 }
 
-fn resolve_base_id<'a>(params: &'a HashMap<String, String>, config: &'a AirtableConfig) -> Result<&'a str, ConnectorError> {
-    params.get("base_id").map(|s| s.as_str())
+fn resolve_base_id<'a>(
+    params: &'a HashMap<String, String>,
+    config: &'a AirtableConfig,
+) -> Result<&'a str, ConnectorError> {
+    params
+        .get("base_id")
+        .map(|s| s.as_str())
         .or(config.base_id.as_deref())
         .ok_or_else(|| ConnectorError::MissingParam("base_id".into()))
 }
 
-async fn list_records(params: &HashMap<String, String>, config: &AirtableConfig) -> Result<String, ConnectorError> {
+async fn list_records(
+    params: &HashMap<String, String>,
+    config: &AirtableConfig,
+) -> Result<String, ConnectorError> {
     let base_id = resolve_base_id(params, config)?;
     let table = require_param(params, "table")?;
-    let max_records = params.get("max_records").map(|s| s.as_str()).unwrap_or("100");
+    let max_records = params
+        .get("max_records")
+        .map(|s| s.as_str())
+        .unwrap_or("100");
 
     let url = format!("{API_BASE}/{base_id}/{}", urlencoding::encode(table));
     let mut req = reqwest::Client::new()
@@ -116,24 +154,42 @@ async fn list_records(params: &HashMap<String, String>, config: &AirtableConfig)
         req = req.query(&[("view", view.as_str())]);
     }
 
-    let resp = req.send().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(base_id, table, "Airtable records listed");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to list records").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to list records")
+                .to_string(),
+        })
     }
 }
 
-async fn get_record(params: &HashMap<String, String>, config: &AirtableConfig) -> Result<String, ConnectorError> {
+async fn get_record(
+    params: &HashMap<String, String>,
+    config: &AirtableConfig,
+) -> Result<String, ConnectorError> {
     let base_id = resolve_base_id(params, config)?;
     let table = require_param(params, "table")?;
     let record_id = require_param(params, "record_id")?;
 
-    let url = format!("{API_BASE}/{base_id}/{}/{record_id}", urlencoding::encode(table));
+    let url = format!(
+        "{API_BASE}/{base_id}/{}/{record_id}",
+        urlencoding::encode(table)
+    );
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -142,17 +198,29 @@ async fn get_record(params: &HashMap<String, String>, config: &AirtableConfig) -
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(base_id, table, record_id, "Airtable record retrieved");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("not found").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("not found")
+                .to_string(),
+        })
     }
 }
 
-async fn create_record(params: &HashMap<String, String>, config: &AirtableConfig) -> Result<String, ConnectorError> {
+async fn create_record(
+    params: &HashMap<String, String>,
+    config: &AirtableConfig,
+) -> Result<String, ConnectorError> {
     let base_id = resolve_base_id(params, config)?;
     let table = require_param(params, "table")?;
     let fields_str = require_param(params, "fields")?;
@@ -171,18 +239,30 @@ async fn create_record(params: &HashMap<String, String>, config: &AirtableConfig
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         let record_id = resp_body["id"].as_str().unwrap_or("");
         info!(base_id, table, record_id, "Airtable record created");
         Ok(serde_json::json!({ "status": "success", "id": record_id, "fields": resp_body["fields"] }).to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to create record").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to create record")
+                .to_string(),
+        })
     }
 }
 
-async fn update_record(params: &HashMap<String, String>, config: &AirtableConfig) -> Result<String, ConnectorError> {
+async fn update_record(
+    params: &HashMap<String, String>,
+    config: &AirtableConfig,
+) -> Result<String, ConnectorError> {
     let base_id = resolve_base_id(params, config)?;
     let table = require_param(params, "table")?;
     let record_id = require_param(params, "record_id")?;
@@ -191,7 +271,10 @@ async fn update_record(params: &HashMap<String, String>, config: &AirtableConfig
         .map_err(|e| ConnectorError::HttpError(format!("invalid fields JSON: {e}")))?;
 
     let body = serde_json::json!({ "fields": fields });
-    let url = format!("{API_BASE}/{base_id}/{}/{record_id}", urlencoding::encode(table));
+    let url = format!(
+        "{API_BASE}/{base_id}/{}/{record_id}",
+        urlencoding::encode(table)
+    );
     let resp = reqwest::Client::new()
         .patch(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -202,17 +285,29 @@ async fn update_record(params: &HashMap<String, String>, config: &AirtableConfig
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(base_id, table, record_id, "Airtable record updated");
         Ok(serde_json::json!({ "status": "success", "id": record_id, "fields": resp_body["fields"] }).to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to update").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to update")
+                .to_string(),
+        })
     }
 }
 
-async fn search(params: &HashMap<String, String>, config: &AirtableConfig) -> Result<String, ConnectorError> {
+async fn search(
+    params: &HashMap<String, String>,
+    config: &AirtableConfig,
+) -> Result<String, ConnectorError> {
     let base_id = resolve_base_id(params, config)?;
     let table = require_param(params, "table")?;
     let formula = require_param(params, "formula")?;
@@ -227,13 +322,22 @@ async fn search(params: &HashMap<String, String>, config: &AirtableConfig) -> Re
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!(base_id, table, "Airtable search completed");
         Ok(resp_body.to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("search failed").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("search failed")
+                .to_string(),
+        })
     }
 }
 
@@ -247,12 +351,21 @@ async fn list_bases(config: &AirtableConfig) -> Result<String, ConnectorError> {
         .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     let status = resp.status();
-    let resp_body: serde_json::Value = resp.json().await.map_err(|e| ConnectorError::HttpError(e.to_string()))?;
+    let resp_body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| ConnectorError::HttpError(e.to_string()))?;
 
     if status.is_success() {
         info!("Airtable bases listed");
         Ok(resp_body["bases"].to_string())
     } else {
-        Err(ConnectorError::ApiError { status: status.as_u16(), message: resp_body["error"]["message"].as_str().unwrap_or("failed to list bases").to_string() })
+        Err(ConnectorError::ApiError {
+            status: status.as_u16(),
+            message: resp_body["error"]["message"]
+                .as_str()
+                .unwrap_or("failed to list bases")
+                .to_string(),
+        })
     }
 }
