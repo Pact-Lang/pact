@@ -4,7 +4,7 @@
 
 PACT is a **language**, not a library. Where frameworks bolt safety onto Python after the fact, PACT encodes permissions, types, and agent contracts directly into its syntax. Every tool declares what it needs. Every agent declares what it may do. The compiler enforces the rest -- before a single API call is made. Write once, deploy to **Claude, OpenAI, CrewAI, Cursor, and Gemini**. The result: AI agent systems you can reason about, audit, and trust.
 
-**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | remote agent federation with trust boundaries | package registry | streaming responses | MCP server (stdio + SSE) | LSP + VS Code | WASM module (7 exports) | Mermaid agentflow diagrams (bidirectional) | CI pipeline | 783+ tests
+**Key capabilities:** compile-time permission enforcement | typed agent contracts | compliance declarations (GDPR, HIPAA, PCI-DSS, SOX) | multi-target build (5 backends) | agent cards for A2A discovery | remote agent federation with trust boundaries | package registry | streaming responses | MCP server (stdio + SSE) | LSP + VS Code | WASM module (4 exports) | CI pipeline | 783+ tests
 
 ## Why PACT?
 
@@ -20,7 +20,7 @@ PACT is a **language**, not a library. Where frameworks bolt safety onto Python 
 | Composable prompts | Templates + Directives | String concatenation | String templates | String templates |
 | Source providers | Declarative (`source:`) | Raw HTTP calls | Manual | Manual |
 | Auto-guardrails | GDPR, HIPAA, PCI-DSS, SOX | Manual | None | None |
-| Diagram export | Mermaid agentflow (bidirectional) | None | None | None |
+| Diagram export | Visual agent diagrams | None | None | None |
 | WASM support | Browser + embeddable module | None | None | None |
 | Tooling | LSP, VS Code, formatter, MCP | IDE plugins | None | None |
 
@@ -347,7 +347,7 @@ The MCP server exposes PACT's type checking, build, and documentation capabiliti
 
 ## WASM Module
 
-PACT compiles to WebAssembly for browser and embedded use. The `pact-wasm` package exposes 7 functions:
+PACT compiles to WebAssembly for browser and embedded use. The `pact-wasm` package exposes 4 functions:
 
 ```javascript
 import init, {
@@ -355,18 +355,12 @@ import init, {
   pact_fmt,              // Format to canonical style
   pact_doc,              // Generate Markdown documentation
   pact_agent_cards,      // Generate A2A agent card JSON
-  pact_to_agentflow,     // Convert .pact to Mermaid agentflow diagram
-  pact_to_agentflow_json,// Convert .pact to agentflow JSON AST
-  agentflow_to_pact,     // Convert Mermaid agentflow to .pact source
 } from './pkg/pact_wasm.js';
 
 await init();
 
 const result = pact_check('agent @g { permits: [^llm.query] tools: [#greet] }');
 console.log(result); // "OK"
-
-const mermaid = pact_to_agentflow(source);  // Generate agentflow diagram
-const pactSrc = agentflow_to_pact(mermaid); // Round-trip back to PACT
 ```
 
 Build from source:
@@ -375,25 +369,6 @@ Build from source:
 make wasm              # Build WASM package to pkg/
 make wasm-test         # Run WASM native tests
 ```
-
-## Mermaid Agentflow Diagrams
-
-PACT supports bidirectional conversion with Mermaid's `agentflow` diagram type. Export any PACT program as a visual agent architecture diagram, or import an agentflow diagram as PACT source:
-
-```bash
-pact to-mermaid examples/website_builder.pact -o diagram.mmd
-pact from-mermaid diagram.mmd -o generated.pact
-```
-
-The agentflow emitter produces structured diagrams with:
-- **Agent subgraphs** containing tools, skills, and metadata
-- **Flow rendering** with dispatch, pipeline, and fallback edges
-- **Group containers** with ELK layout algorithms for organized visual structure
-- **Skill nodes** rendered as intermediate `stadium`-shaped nodes in flow steps
-- **Collapsed type sections** for cleaner diagrams
-- **Permission delegation** visualized with hierarchical edges
-
-This is developed in collaboration with the Mermaid team as part of the agentflow spec.
 
 ## Examples
 
@@ -468,8 +443,7 @@ Write 10 lines of PACT. Get production-grade guardrails for free.
 | `pact-cli` | CLI frontend (11 commands) |
 | `pact-lsp` | Language server (diagnostics, completion, hover) |
 | `pact-mcp` | Model Context Protocol server (stdio + SSE) |
-| `pact-mermaid` | Mermaid agentflow diagram conversion (bidirectional) |
-| `pact-wasm` | WebAssembly module (7 browser-safe exports) |
+| `pact-wasm` | WebAssembly module (4 browser-safe exports) |
 | `pact-federation` | Federation registry client and trust resolution |
 | `pact-registry` | Package registry for sharing templates, directives, tools |
 
@@ -507,8 +481,6 @@ Configure the LSP path in settings if needed:
 | `pact doc <file> [-o file]` | Generate Markdown documentation |
 | `pact playground [--load file]` | Interactive REPL |
 | `pact list [skills\|prompts\|all]` | List built-in skills and templates |
-| `pact to-mermaid <file>` | Export flow as an agentflow Mermaid diagram |
-| `pact from-mermaid <file>` | Import a Mermaid diagram as PACT |
 
 ## Built-in Providers
 
@@ -535,8 +507,7 @@ Configure the LSP path in settings if needed:
 - [x] Compliance declarations -- risk tiers, audit levels, SOD roles, regulatory frameworks
 - [x] Agent cards -- A2A discovery JSON
 - [x] MCP server -- stdio and SSE transports
-- [x] WASM module -- 7 browser-safe exports (check, fmt, doc, agent cards, agentflow)
-- [x] Mermaid agentflow diagrams -- bidirectional conversion with grouping and skill rendering
+- [x] WASM module -- 4 browser-safe exports (check, fmt, doc, agent cards)
 - [x] Package registry -- share and reuse templates, directives, tools
 - [x] Streaming responses -- real-time agent output
 - [x] Remote agent federation -- cross-network discovery and dispatch with trust boundaries
