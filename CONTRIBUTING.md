@@ -20,7 +20,6 @@ cargo test
 | `pact-dispatch` | Runtime: API clients, tool execution, retry, cache |
 | `pact-cli` | CLI binary (`pact check`, `pact run`, `pact fmt`, etc.) |
 | `pact-lsp` | Language Server Protocol for editor integration |
-| `pact-mermaid` | Bidirectional Mermaid diagram conversion |
 | `pact-mcp` | Model Context Protocol server |
 
 ## Before Submitting

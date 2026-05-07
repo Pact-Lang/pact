@@ -24,6 +24,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code formatter (`pact fmt`).
 - Documentation generator (`pact doc`).
 - Interactive playground / REPL (`pact playground`).
-- Mermaid diagram integration (`pact to-mermaid` / `pact from-mermaid`).
 - 10 built-in source providers: DuckDuckGo, Google, Brave search; HTTP GET/POST; filesystem read/write/glob; time; JSON parse.
 - Automatic guardrails for GDPR, CCPA, COPPA, PCI-DSS, and HIPAA based on declared permissions.

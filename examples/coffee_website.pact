@@ -1,5 +1,5 @@
 -- Coffee Website Builder — Full PACT Feature Showcase
--- Demonstrates every PACT language construct for the Mermaid agentflow spec.
+-- Demonstrates every PACT language construct.
 --
 -- Constructs used:
 --   permit_tree, schema, type (alias), template, directive, tool, skill,
