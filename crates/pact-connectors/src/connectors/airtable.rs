@@ -13,6 +13,10 @@ use super::{AirtableConfig, Connector, ConnectorConfig, ConnectorError};
 
 const API_BASE: &str = "https://api.airtable.com/v0";
 
+fn api_base(config: &AirtableConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct AirtableConnector;
 
 #[async_trait]
@@ -145,7 +149,11 @@ async fn list_records(
         .map(|s| s.as_str())
         .unwrap_or("100");
 
-    let url = format!("{API_BASE}/{base_id}/{}", urlencoding::encode(table));
+    let url = format!(
+        "{}/{base_id}/{}",
+        api_base(config),
+        urlencoding::encode(table)
+    );
     let mut req = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -187,7 +195,8 @@ async fn get_record(
     let record_id = require_param(params, "record_id")?;
 
     let url = format!(
-        "{API_BASE}/{base_id}/{}/{record_id}",
+        "{}/{base_id}/{}/{record_id}",
+        api_base(config),
         urlencoding::encode(table)
     );
     let resp = reqwest::Client::new()
@@ -228,7 +237,11 @@ async fn create_record(
         .map_err(|e| ConnectorError::HttpError(format!("invalid fields JSON: {e}")))?;
 
     let body = serde_json::json!({ "fields": fields });
-    let url = format!("{API_BASE}/{base_id}/{}", urlencoding::encode(table));
+    let url = format!(
+        "{}/{base_id}/{}",
+        api_base(config),
+        urlencoding::encode(table)
+    );
     let resp = reqwest::Client::new()
         .post(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -272,7 +285,8 @@ async fn update_record(
 
     let body = serde_json::json!({ "fields": fields });
     let url = format!(
-        "{API_BASE}/{base_id}/{}/{record_id}",
+        "{}/{base_id}/{}/{record_id}",
+        api_base(config),
         urlencoding::encode(table)
     );
     let resp = reqwest::Client::new()
@@ -312,7 +326,11 @@ async fn search(
     let table = require_param(params, "table")?;
     let formula = require_param(params, "formula")?;
 
-    let url = format!("{API_BASE}/{base_id}/{}", urlencoding::encode(table));
+    let url = format!(
+        "{}/{base_id}/{}",
+        api_base(config),
+        urlencoding::encode(table)
+    );
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -342,7 +360,7 @@ async fn search(
 }
 
 async fn list_bases(config: &AirtableConfig) -> Result<String, ConnectorError> {
-    let url = "https://api.airtable.com/v0/meta/bases";
+    let url = format!("{}/meta/bases", api_base(config));
     let resp = reqwest::Client::new()
         .get(url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))

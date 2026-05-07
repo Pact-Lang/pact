@@ -32,6 +32,10 @@ use async_trait::async_trait;
 
 const API_BASE: &str = "https://api.figma.com/v1";
 
+fn api_base(config: &FigmaConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct FigmaConnector;
 
 #[async_trait]
@@ -126,8 +130,8 @@ async fn get_file(
     config: &FigmaConfig,
 ) -> Result<String, ConnectorError> {
     let file_key = require_param(params, "file_key")?;
-
-    let url = format!("{API_BASE}/files/{file_key}");
+    let base = api_base(config);
+    let url = format!("{base}/files/{file_key}");
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -195,8 +199,8 @@ async fn export_node(
     let node_id = require_param(params, "node_id")?;
     let format = params.get("format").map(|s| s.as_str()).unwrap_or("png");
     let scale = params.get("scale").map(|s| s.as_str()).unwrap_or("2");
-
-    let url = format!("{API_BASE}/images/{file_key}");
+    let base = api_base(config);
+    let url = format!("{base}/images/{file_key}");
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -241,8 +245,8 @@ async fn get_components(
     config: &FigmaConfig,
 ) -> Result<String, ConnectorError> {
     let file_key = require_param(params, "file_key")?;
-
-    let url = format!("{API_BASE}/files/{file_key}/components");
+    let base = api_base(config);
+    let url = format!("{base}/files/{file_key}/components");
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
@@ -292,8 +296,8 @@ async fn get_styles(
     config: &FigmaConfig,
 ) -> Result<String, ConnectorError> {
     let file_key = require_param(params, "file_key")?;
-
-    let url = format!("{API_BASE}/files/{file_key}/styles");
+    let base = api_base(config);
+    let url = format!("{base}/files/{file_key}/styles");
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.token))

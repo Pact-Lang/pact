@@ -198,6 +198,7 @@ mod is_configured {
                 token: "t".into(),
                 owner: "o".into(),
                 repo: "r".into(),
+                base_url: None,
             }),
             ..Default::default()
         };
@@ -211,6 +212,7 @@ mod is_configured {
         let config = ConnectorConfig {
             notion: Some(NotionConfig {
                 token: "ntn_xxx".into(),
+                base_url: None,
             }),
             ..Default::default()
         };
@@ -227,40 +229,55 @@ mod is_configured {
                 token: "t".into(),
                 owner: "o".into(),
                 repo: "r".into(),
+                base_url: None,
             }),
-            figma: Some(FigmaConfig { token: "t".into() }),
+            figma: Some(FigmaConfig {
+                token: "t".into(),
+                base_url: None,
+            }),
             slack: Some(SlackConfig {
                 token: "t".into(),
                 default_channel: None,
+                base_url: None,
             }),
             resend: Some(ResendConfig {
                 api_key: "k".into(),
                 from: "a@b.c".into(),
+                base_url: None,
             }),
             gdrive: Some(GDriveConfig {
                 access_token: "t".into(),
                 default_folder: None,
+                base_url: None,
             }),
             mermaid: Some(MermaidConfig {
                 token: "t".into(),
                 default_project_id: None,
+                base_url: None,
             }),
             jira: Some(JiraConfig {
                 email: "e".into(),
                 api_token: "t".into(),
                 domain: "d".into(),
                 default_project: None,
+                base_url: None,
             }),
-            notion: Some(NotionConfig { token: "t".into() }),
+            notion: Some(NotionConfig {
+                token: "t".into(),
+                base_url: None,
+            }),
             linear: Some(LinearConfig {
                 api_key: "k".into(),
+                base_url: None,
             }),
             teams: Some(TeamsConfig {
                 access_token: "t".into(),
+                base_url: None,
             }),
             airtable: Some(AirtableConfig {
                 token: "t".into(),
                 base_id: None,
+                base_url: None,
             }),
         };
         for c in registry.all() {
@@ -410,6 +427,7 @@ mod param_validation {
                 token: "t".into(),
                 owner: "o".into(),
                 repo: "r".into(),
+                base_url: None,
             }),
             ..Default::default()
         }
@@ -420,6 +438,7 @@ mod param_validation {
             slack: Some(SlackConfig {
                 token: "t".into(),
                 default_channel: None,
+                base_url: None,
             }),
             ..Default::default()
         }
@@ -430,6 +449,7 @@ mod param_validation {
             airtable: Some(AirtableConfig {
                 token: "t".into(),
                 base_id: None,
+                base_url: None,
             }),
             ..Default::default()
         }
@@ -439,6 +459,7 @@ mod param_validation {
         ConnectorConfig {
             linear: Some(LinearConfig {
                 api_key: "k".into(),
+                base_url: None,
             }),
             ..Default::default()
         }
@@ -446,7 +467,10 @@ mod param_validation {
 
     fn config_with_notion() -> ConnectorConfig {
         ConnectorConfig {
-            notion: Some(NotionConfig { token: "t".into() }),
+            notion: Some(NotionConfig {
+                token: "t".into(),
+                base_url: None,
+            }),
             ..Default::default()
         }
     }
@@ -455,6 +479,7 @@ mod param_validation {
         ConnectorConfig {
             teams: Some(TeamsConfig {
                 access_token: "t".into(),
+                base_url: None,
             }),
             ..Default::default()
         }

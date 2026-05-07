@@ -38,6 +38,10 @@ use async_trait::async_trait;
 
 const API_BASE: &str = "https://api.github.com";
 
+fn api_base(config: &GitHubConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct GitHubConnector;
 
 #[async_trait]
@@ -306,9 +310,10 @@ async fn push_file(
         .map(|s| s.as_str())
         .unwrap_or("Update via PACT flow");
     let branch = params.get("branch").map(|s| s.as_str()).unwrap_or("main");
+    let base = api_base(config);
 
     // Check if file exists (to get SHA for update).
-    let url = format!("{API_BASE}/repos/{owner}/{repo}/contents/{path}");
+    let url = format!("{base}/repos/{owner}/{repo}/contents/{path}");
     let http = client(config);
     let mut req = http.get(&url);
     for (k, v) in auth_headers(config) {
@@ -396,6 +401,7 @@ async fn create_pr(
         .ok_or_else(|| ConnectorError::MissingParam("title".into()))?;
     let base = params.get("base").map(|s| s.as_str()).unwrap_or("main");
     let body_text = params.get("body").map(|s| s.as_str()).unwrap_or("");
+    let base_url = api_base(config);
     let http = client(config);
 
     // If `files` is provided, push them to a new branch first.
@@ -434,7 +440,7 @@ async fn create_pr(
         let mut base_sha = None;
         for try_branch in &branches_to_try {
             let base_ref_url =
-                format!("{API_BASE}/repos/{owner}/{repo}/git/ref/heads/{try_branch}");
+                format!("{base_url}/repos/{owner}/{repo}/git/ref/heads/{try_branch}");
             let mut req = http.get(&base_ref_url);
             for (k, v) in auth_headers(config) {
                 req = req.header(k, v);
@@ -481,7 +487,7 @@ async fn create_pr(
                 owner,
                 repo, "repo appears empty — bootstrapping with initial commit"
             );
-            let init_url = format!("{API_BASE}/repos/{owner}/{repo}/contents/README.md");
+            let init_url = format!("{base_url}/repos/{owner}/{repo}/contents/README.md");
             let init_content =
                 BASE64.encode(format!("# {repo}\n\nInitialized by PACT flow.\n").as_bytes());
             let mut req = http.put(&init_url).json(&serde_json::json!({
@@ -507,7 +513,7 @@ async fn create_pr(
                 });
             }
             // Now get the SHA of the default branch.
-            let base_ref_url = format!("{API_BASE}/repos/{owner}/{repo}/git/ref/heads/{base}");
+            let base_ref_url = format!("{base_url}/repos/{owner}/{repo}/git/ref/heads/{base}");
             let mut req = http.get(&base_ref_url);
             for (k, v) in auth_headers(config) {
                 req = req.header(k, v);
@@ -531,7 +537,7 @@ async fn create_pr(
         };
 
         // Step 2: Create the new branch.
-        let create_ref_url = format!("{API_BASE}/repos/{owner}/{repo}/git/refs");
+        let create_ref_url = format!("{base_url}/repos/{owner}/{repo}/git/refs");
         let mut req = http.post(&create_ref_url).json(&serde_json::json!({
             "ref": format!("refs/heads/{branch}"),
             "sha": base_sha,
@@ -561,7 +567,7 @@ async fn create_pr(
         for (path, content_val) in files_map {
             let content = content_val.as_str().unwrap_or("");
             let encoded = BASE64.encode(content.as_bytes());
-            let file_url = format!("{API_BASE}/repos/{owner}/{repo}/contents/{path}");
+            let file_url = format!("{base_url}/repos/{owner}/{repo}/contents/{path}");
 
             // Check if file exists on the branch (need SHA for update).
             let mut req = http.get(&file_url).query(&[("ref", branch.as_str())]);
@@ -617,7 +623,7 @@ async fn create_pr(
     };
 
     // Step 4: Create the pull request.
-    let pr_url = format!("{API_BASE}/repos/{owner}/{repo}/pulls");
+    let pr_url = format!("{base_url}/repos/{owner}/{repo}/pulls");
     let mut req = http.post(&pr_url).json(&serde_json::json!({
         "title": title,
         "head": head,
@@ -673,8 +679,9 @@ async fn create_issue(
         .get("labels")
         .map(|s| s.split(',').map(|l| l.trim()).collect())
         .unwrap_or_default();
+    let base = api_base(config);
 
-    let url = format!("{API_BASE}/repos/{owner}/{repo}/issues");
+    let url = format!("{base}/repos/{owner}/{repo}/issues");
     let http = client(config);
     let mut req = http.post(&url).json(&serde_json::json!({
         "title": title,
@@ -725,8 +732,9 @@ async fn read_file(
         .get("path")
         .ok_or_else(|| ConnectorError::MissingParam("path".into()))?;
     let branch = params.get("branch").map(|s| s.as_str()).unwrap_or("main");
+    let base = api_base(config);
 
-    let url = format!("{API_BASE}/repos/{owner}/{repo}/contents/{path}");
+    let url = format!("{base}/repos/{owner}/{repo}/contents/{path}");
     let http = client(config);
     let mut req = http.get(&url).query(&[("ref", branch)]);
     for (k, v) in auth_headers(config) {
@@ -776,8 +784,9 @@ async fn list_issues(
     let repo = get_param(params, "repo", config)?;
     let state = params.get("state").map(|s| s.as_str()).unwrap_or("open");
     let per_page = params.get("per_page").map(|s| s.as_str()).unwrap_or("30");
+    let base = api_base(config);
 
-    let url = format!("{API_BASE}/repos/{owner}/{repo}/issues");
+    let url = format!("{base}/repos/{owner}/{repo}/issues");
     let http = client(config);
     let mut req = http.get(&url).query(&[
         ("state", state),
@@ -848,8 +857,9 @@ async fn list_pulls(
     let repo = get_param(params, "repo", config)?;
     let state = params.get("state").map(|s| s.as_str()).unwrap_or("open");
     let per_page = params.get("per_page").map(|s| s.as_str()).unwrap_or("30");
+    let base = api_base(config);
 
-    let url = format!("{API_BASE}/repos/{owner}/{repo}/pulls");
+    let url = format!("{base}/repos/{owner}/{repo}/pulls");
     let http = client(config);
     let mut req = http.get(&url).query(&[
         ("state", state),
@@ -919,8 +929,9 @@ async fn get_issue_comments(
         .get("issue_number")
         .ok_or_else(|| ConnectorError::MissingParam("issue_number".into()))?;
     let per_page = params.get("per_page").map(|s| s.as_str()).unwrap_or("30");
+    let base = api_base(config);
 
-    let url = format!("{API_BASE}/repos/{owner}/{repo}/issues/{issue_number}/comments");
+    let url = format!("{base}/repos/{owner}/{repo}/issues/{issue_number}/comments");
     let http = client(config);
     let mut req = http.get(&url).query(&[("per_page", per_page)]);
     if let Some(since) = params.get("since") {
@@ -987,10 +998,11 @@ async fn get_pull_comments(
         .get("pull_number")
         .ok_or_else(|| ConnectorError::MissingParam("pull_number".into()))?;
     let per_page = params.get("per_page").map(|s| s.as_str()).unwrap_or("30");
+    let base = api_base(config);
 
     // Fetch both issue-style comments and review comments
-    let issue_url = format!("{API_BASE}/repos/{owner}/{repo}/issues/{pull_number}/comments");
-    let review_url = format!("{API_BASE}/repos/{owner}/{repo}/pulls/{pull_number}/comments");
+    let issue_url = format!("{base}/repos/{owner}/{repo}/issues/{pull_number}/comments");
+    let review_url = format!("{base}/repos/{owner}/{repo}/pulls/{pull_number}/comments");
     let http = client(config);
 
     let mut issue_req = http.get(&issue_url).query(&[("per_page", per_page)]);
@@ -1074,8 +1086,9 @@ async fn list_repos(
     config: &GitHubConfig,
 ) -> Result<String, ConnectorError> {
     let owner = get_param(params, "owner", config)?;
+    let base = api_base(config);
 
-    let url = format!("{API_BASE}/users/{owner}/repos");
+    let url = format!("{base}/users/{owner}/repos");
     let http = client(config);
     let mut req = http
         .get(&url)

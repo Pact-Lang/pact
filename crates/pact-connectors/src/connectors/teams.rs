@@ -13,6 +13,10 @@ use super::{Connector, ConnectorConfig, ConnectorError, TeamsConfig};
 
 const API_BASE: &str = "https://graph.microsoft.com/v1.0";
 
+fn api_base(config: &TeamsConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct TeamsConnector;
 
 #[async_trait]
@@ -119,7 +123,10 @@ async fn post_message(
         "body": { "contentType": content_type, "content": content }
     });
 
-    let url = format!("{API_BASE}/teams/{team_id}/channels/{channel_id}/messages");
+    let url = format!(
+        "{}/teams/{team_id}/channels/{channel_id}/messages",
+        api_base(config)
+    );
     let resp = reqwest::Client::new()
         .post(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))
@@ -156,7 +163,7 @@ async fn list_channels(
 ) -> Result<String, ConnectorError> {
     let team_id = require_param(params, "team_id")?;
 
-    let url = format!("{API_BASE}/teams/{team_id}/channels");
+    let url = format!("{}/teams/{team_id}/channels", api_base(config));
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))
@@ -196,7 +203,7 @@ async fn create_channel(
         body["description"] = serde_json::json!(desc);
     }
 
-    let url = format!("{API_BASE}/teams/{team_id}/channels");
+    let url = format!("{}/teams/{team_id}/channels", api_base(config));
     let resp = reqwest::Client::new()
         .post(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))
@@ -228,7 +235,7 @@ async fn create_channel(
 }
 
 async fn list_teams(config: &TeamsConfig) -> Result<String, ConnectorError> {
-    let url = format!("{API_BASE}/me/joinedTeams");
+    let url = format!("{}/me/joinedTeams", api_base(config));
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))

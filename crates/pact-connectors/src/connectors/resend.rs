@@ -37,6 +37,10 @@ use async_trait::async_trait;
 
 const API_BASE: &str = "https://api.resend.com";
 
+fn api_base(config: &ResendConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct ResendConnector;
 
 #[async_trait]
@@ -204,8 +208,9 @@ async fn send_email(
         body["reply_to"] = serde_json::json!(reply_to);
     }
 
+    let base = api_base(config);
     let resp = reqwest::Client::new()
-        .post(format!("{API_BASE}/emails"))
+        .post(format!("{base}/emails"))
         .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)

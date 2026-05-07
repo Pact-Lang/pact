@@ -136,8 +136,11 @@ pub async fn execute_action(
     }
 }
 
-fn base_url(config: &JiraConfig) -> String {
-    format!("https://{}.atlassian.net/rest/api/3", config.domain)
+fn api_base(config: &JiraConfig) -> String {
+    config
+        .base_url
+        .clone()
+        .unwrap_or_else(|| format!("https://{}.atlassian.net/rest/api/3", config.domain))
 }
 
 fn auth_header(config: &JiraConfig) -> String {
@@ -216,7 +219,7 @@ async fn create_issue(
     let body = serde_json::json!({ "fields": fields });
 
     let resp = reqwest::Client::new()
-        .post(format!("{}/issue", base_url(config)))
+        .post(format!("{}/issue", api_base(config)))
         .header(AUTHORIZATION, auth_header(config))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
@@ -273,7 +276,7 @@ async fn search(
     });
 
     let resp = reqwest::Client::new()
-        .post(format!("{}/search", base_url(config)))
+        .post(format!("{}/search", api_base(config)))
         .header(AUTHORIZATION, auth_header(config))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)
@@ -312,7 +315,7 @@ async fn get_issue(
         .ok_or_else(|| ConnectorError::MissingParam("issue_key".into()))?;
 
     let resp = reqwest::Client::new()
-        .get(format!("{}/issue/{}", base_url(config), issue_key))
+        .get(format!("{}/issue/{}", api_base(config), issue_key))
         .header(AUTHORIZATION, auth_header(config))
         .send()
         .await
@@ -366,7 +369,7 @@ async fn add_comment(
     });
 
     let resp = reqwest::Client::new()
-        .post(format!("{}/issue/{}/comment", base_url(config), issue_key))
+        .post(format!("{}/issue/{}/comment", api_base(config), issue_key))
         .header(AUTHORIZATION, auth_header(config))
         .header(CONTENT_TYPE, "application/json")
         .json(&comment_body)
@@ -402,7 +405,7 @@ async fn add_comment(
 /// List all accessible Jira projects.
 async fn list_projects(config: &JiraConfig) -> Result<String, ConnectorError> {
     let resp = reqwest::Client::new()
-        .get(format!("{}/project", base_url(config)))
+        .get(format!("{}/project", api_base(config)))
         .header(AUTHORIZATION, auth_header(config))
         .send()
         .await

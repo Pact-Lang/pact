@@ -13,6 +13,10 @@ use super::{Connector, ConnectorConfig, ConnectorError, LinearConfig};
 
 const API_URL: &str = "https://api.linear.app/graphql";
 
+fn api_url(config: &LinearConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_URL)
+}
+
 pub struct LinearConnector;
 
 #[async_trait]
@@ -123,7 +127,7 @@ async fn graphql(
 ) -> Result<serde_json::Value, ConnectorError> {
     let body = serde_json::json!({ "query": query, "variables": variables });
     let resp = reqwest::Client::new()
-        .post(API_URL)
+        .post(api_url(config))
         .header(AUTHORIZATION, format!("Bearer {}", config.api_key))
         .header(CONTENT_TYPE, "application/json")
         .json(&body)

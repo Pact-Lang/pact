@@ -52,6 +52,13 @@ use async_trait::async_trait;
 const API_BASE: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
 
+fn api_base(config: &GDriveConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+fn upload_base(config: &GDriveConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(UPLOAD_BASE)
+}
+
 pub struct GDriveConnector;
 
 #[async_trait]
@@ -215,8 +222,9 @@ async fn upload_file(
         metadata
     );
 
+    let upload = upload_base(config);
     let url = format!(
-        "{UPLOAD_BASE}/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType,size"
+        "{upload}/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,mimeType,size"
     );
     let resp = reqwest::Client::new()
         .post(&url)
@@ -276,7 +284,8 @@ async fn create_folder(
         metadata["parents"] = serde_json::json!([pid]);
     }
 
-    let url = format!("{API_BASE}/files?fields=id,name,webViewLink");
+    let base = api_base(config);
+    let url = format!("{base}/files?fields=id,name,webViewLink");
     let resp = reqwest::Client::new()
         .post(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))
@@ -327,7 +336,8 @@ async fn list_files(
     }
     let q = query_parts.join(" and ");
 
-    let url = format!("{API_BASE}/files");
+    let base = api_base(config);
+    let url = format!("{base}/files");
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))
@@ -389,7 +399,8 @@ async fn share_file(
     let email = require_param(params, "email")?;
     let role = params.get("role").map(|s| s.as_str()).unwrap_or("reader"); // reader, writer, commenter
 
-    let url = format!("{API_BASE}/files/{file_id}/permissions");
+    let base = api_base(config);
+    let url = format!("{base}/files/{file_id}/permissions");
     let body = serde_json::json!({
         "type": "user",
         "role": role,
@@ -439,7 +450,8 @@ async fn get_file(
 ) -> Result<String, ConnectorError> {
     let file_id = require_param(params, "file_id")?;
 
-    let url = format!("{API_BASE}/files/{file_id}");
+    let base = api_base(config);
+    let url = format!("{base}/files/{file_id}");
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, format!("Bearer {}", config.access_token))

@@ -14,6 +14,10 @@ use super::{Connector, ConnectorConfig, ConnectorError, NotionConfig};
 const API_BASE: &str = "https://api.notion.com/v1";
 const NOTION_VERSION: &str = "2022-06-28";
 
+fn api_base(config: &NotionConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct NotionConnector;
 
 #[async_trait]
@@ -144,7 +148,7 @@ async fn search(
     }
 
     let mut req = http(config)
-        .post(format!("{API_BASE}/search"))
+        .post(format!("{}/search", api_base(config)))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -181,7 +185,7 @@ async fn get_page(
 ) -> Result<String, ConnectorError> {
     let page_id = require_param(params, "page_id")?;
 
-    let mut req = http(config).get(format!("{API_BASE}/pages/{page_id}"));
+    let mut req = http(config).get(format!("{}/pages/{page_id}", api_base(config)));
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }
@@ -239,7 +243,7 @@ async fn create_page(
     }
 
     let mut req = http(config)
-        .post(format!("{API_BASE}/pages"))
+        .post(format!("{}/pages", api_base(config)))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -285,7 +289,7 @@ async fn update_page(
 
     let body = serde_json::json!({ "properties": properties });
     let mut req = http(config)
-        .patch(format!("{API_BASE}/pages/{page_id}"))
+        .patch(format!("{}/pages/{page_id}", api_base(config)))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -335,7 +339,10 @@ async fn query_database(
     }
 
     let mut req = http(config)
-        .post(format!("{API_BASE}/databases/{database_id}/query"))
+        .post(format!(
+            "{}/databases/{database_id}/query",
+            api_base(config)
+        ))
         .header(CONTENT_TYPE, "application/json")
         .json(&body);
     for (k, v) in auth_headers(config) {
@@ -372,7 +379,7 @@ async fn get_database(
 ) -> Result<String, ConnectorError> {
     let database_id = require_param(params, "database_id")?;
 
-    let mut req = http(config).get(format!("{API_BASE}/databases/{database_id}"));
+    let mut req = http(config).get(format!("{}/databases/{database_id}", api_base(config)));
     for (k, v) in auth_headers(config) {
         req = req.header(k, v);
     }

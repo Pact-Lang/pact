@@ -75,6 +75,10 @@ When generating Mermaid diagram code, you MUST follow these rules strictly:
 
 const API_BASE: &str = "https://www.mermaidchart.com/rest-api";
 
+fn api_base(config: &MermaidConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct MermaidConnector;
 
 #[async_trait]
@@ -222,7 +226,7 @@ fn friendly_error(
 
 /// List all projects.
 async fn list_projects(config: &MermaidConfig) -> Result<String, ConnectorError> {
-    let url = format!("{API_BASE}/projects");
+    let url = format!("{}/projects", api_base(config));
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, auth_header(config))
@@ -285,7 +289,7 @@ async fn list_documents(
 ) -> Result<String, ConnectorError> {
     let project_id = resolve_project_id(params, config).await?;
 
-    let url = format!("{API_BASE}/projects/{project_id}/documents");
+    let url = format!("{}/projects/{project_id}/documents", api_base(config));
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, auth_header(config))
@@ -321,7 +325,7 @@ async fn get_document(
         .get("document_id")
         .ok_or_else(|| ConnectorError::MissingParam("document_id".into()))?;
 
-    let url = format!("{API_BASE}/documents/{document_id}");
+    let url = format!("{}/documents/{document_id}", api_base(config));
     let resp = reqwest::Client::new()
         .get(&url)
         .header(AUTHORIZATION, auth_header(config))
@@ -368,7 +372,7 @@ async fn create_document(
         .unwrap_or("Untitled");
 
     // Step 1: Create the document shell.
-    let create_url = format!("{API_BASE}/projects/{project_id}/documents");
+    let create_url = format!("{}/projects/{project_id}/documents", api_base(config));
     let create_body = serde_json::json!({ "title": title });
 
     let resp = reqwest::Client::new()
@@ -402,7 +406,7 @@ async fn create_document(
         .ok_or_else(|| ConnectorError::HttpError("no documentID in create response".into()))?;
 
     // Step 2: Update with the diagram code.
-    let update_url = format!("{API_BASE}/documents/{document_id}");
+    let update_url = format!("{}/documents/{document_id}", api_base(config));
     let update_body = serde_json::json!({
         "documentID": document_id,
         "projectID": project_id,
@@ -464,7 +468,7 @@ async fn update_document(
         .ok_or_else(|| ConnectorError::MissingParam("code".into()))?;
     let code = strip_code_fences(raw_code);
 
-    let url = format!("{API_BASE}/documents/{document_id}");
+    let url = format!("{}/documents/{document_id}", api_base(config));
     let mut body = serde_json::json!({
         "documentID": document_id,
         "projectID": project_id,

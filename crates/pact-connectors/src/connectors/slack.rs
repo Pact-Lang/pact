@@ -35,6 +35,10 @@ use async_trait::async_trait;
 
 const API_BASE: &str = "https://slack.com/api";
 
+fn api_base(config: &SlackConfig) -> &str {
+    config.base_url.as_deref().unwrap_or(API_BASE)
+}
+
 pub struct SlackConnector;
 
 #[async_trait]
@@ -138,6 +142,7 @@ async fn post_message(
     params: &HashMap<String, String>,
     config: &SlackConfig,
 ) -> Result<String, ConnectorError> {
+    let base = api_base(config);
     let channel = get_channel(params, config)?;
     let text = params
         .get("text")
@@ -159,7 +164,7 @@ async fn post_message(
     }
 
     let resp = reqwest::Client::new()
-        .post(format!("{API_BASE}/chat.postMessage"))
+        .post(format!("{base}/chat.postMessage"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
         .json(&body)
@@ -198,6 +203,7 @@ async fn upload_file(
     params: &HashMap<String, String>,
     config: &SlackConfig,
 ) -> Result<String, ConnectorError> {
+    let base = api_base(config);
     let channel = get_channel(params, config)?;
     let content = params
         .get("content")
@@ -211,7 +217,7 @@ async fn upload_file(
 
     // Step 1: Get upload URL.
     let resp = reqwest::Client::new()
-        .get(format!("{API_BASE}/files.getUploadURLExternal"))
+        .get(format!("{base}/files.getUploadURLExternal"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .query(&[
             ("filename", filename),
@@ -259,7 +265,7 @@ async fn upload_file(
     });
 
     let resp = reqwest::Client::new()
-        .post(format!("{API_BASE}/files.completeUploadExternal"))
+        .post(format!("{base}/files.completeUploadExternal"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
         .json(&complete_body)
@@ -297,6 +303,7 @@ async fn add_reaction(
     params: &HashMap<String, String>,
     config: &SlackConfig,
 ) -> Result<String, ConnectorError> {
+    let base = api_base(config);
     let channel = get_channel(params, config)?;
     let timestamp = params
         .get("timestamp")
@@ -312,7 +319,7 @@ async fn add_reaction(
     });
 
     let resp = reqwest::Client::new()
-        .post(format!("{API_BASE}/reactions.add"))
+        .post(format!("{base}/reactions.add"))
         .header(AUTHORIZATION, format!("Bearer {}", config.token))
         .header(CONTENT_TYPE, "application/json; charset=utf-8")
         .json(&body)

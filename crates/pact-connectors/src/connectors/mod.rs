@@ -256,11 +256,15 @@ pub struct GitHubConfig {
     pub token: String,
     pub owner: String,
     pub repo: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FigmaConfig {
     pub token: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,6 +272,8 @@ pub struct SlackConfig {
     pub token: String,
     #[serde(default)]
     pub default_channel: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -275,6 +281,8 @@ pub struct ResendConfig {
     pub api_key: String,
     #[serde(default = "default_resend_from")]
     pub from: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 fn default_resend_from() -> String {
@@ -286,6 +294,8 @@ pub struct GDriveConfig {
     pub access_token: String,
     #[serde(default)]
     pub default_folder: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -293,6 +303,8 @@ pub struct MermaidConfig {
     pub token: String,
     #[serde(default)]
     pub default_project_id: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -302,21 +314,29 @@ pub struct JiraConfig {
     pub domain: String,
     #[serde(default)]
     pub default_project: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NotionConfig {
     pub token: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LinearConfig {
     pub api_key: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TeamsConfig {
     pub access_token: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -324,6 +344,8 @@ pub struct AirtableConfig {
     pub token: String,
     #[serde(default)]
     pub base_id: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 // ── execute_connector ───────────────────────────────────────────────────────
